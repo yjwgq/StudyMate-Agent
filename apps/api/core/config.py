@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        # .env 里有 M1+ 才用到的变量，未声明的直接忽略而不报错
+        # .env 里有后续里程碑才用到的变量，未声明的直接忽略而不报错
         extra="ignore",
     )
 
@@ -27,11 +27,31 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "*"
 
-    # ---------------- LLM（DeepSeek，OpenAI 兼容）----------------
+    # ---------------- LLM（OpenAI 兼容，M0）----------------
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = ""
     llm_timeout_s: float = 60.0
+
+    # ---------------- 数据库与 Redis（M1 起启用）----------------
+    # 三个角色分离，见设计文档 v1.1 ADR-9：
+    #   app_api     受 RLS 约束
+    #   app_worker  BYPASSRLS（跨租户扫描定时任务，M9 使用）
+    #   app_owner   拥有表所有权，仅用于迁移
+    database_url: str = ""
+    database_url_worker: str = ""
+    database_url_migrate: str = ""
+    redis_url: str = "redis://redis:6379/0"
+
+    # ---------------- 鉴权（M1）----------------
+    # 生成方式：openssl rand -hex 32
+    jwt_secret: str = ""
+    access_ttl_min: int = 30
+    refresh_ttl_days: int = 7
+
+    # ---------------- 幂等与会话锁（M1，§7.4 / §7.6）----------------
+    idempotency_ttl_s: int = 86400          # Idempotency-Key 结果缓存 24h
+    conversation_lock_ttl_ms: int = 300_000  # 会话锁 TTL 5 分钟（长任务由持有者续期，M5 实现）
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -42,6 +62,14 @@ class Settings(BaseSettings):
     def llm_configured(self) -> bool:
         """LLM 是否已配置齐全。`/ready` 与 chat 路由都依赖它。"""
         return bool(self.llm_api_key and self.llm_model)
+
+    @property
+    def db_configured(self) -> bool:
+        return bool(self.database_url)
+
+    @property
+    def jwt_configured(self) -> bool:
+        return bool(self.jwt_secret)
 
 
 @lru_cache(maxsize=1)

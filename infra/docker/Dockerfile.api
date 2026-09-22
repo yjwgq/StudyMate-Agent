@@ -1,5 +1,5 @@
 # ============================================================
-#  API 镜像 —— FastAPI 后端
+#  API 镜像 —— FastAPI 后端（同时承担 alembic 迁移任务）
 # ============================================================
 #  构建上下文 = 项目根目录
 #      docker build -f infra/docker/Dockerfile.api .
@@ -25,12 +25,16 @@ COPY pyproject.toml ./
 RUN uv sync --no-dev
 
 # ---- 代码层 ----
-# 刻意逐目录 COPY，而不是 COPY apps/ ./apps/：
+# 逐目录 COPY，而不是整个拷贝仓库：
 # 因为 apps/web 是 Node 工程，整个拷进来会让镜像白白变大。
-# 后续里程碑在此追加：COPY worker/ ./worker/  ·  COPY mcp_servers/ ./mcp_servers/
 COPY apps/__init__.py ./apps/__init__.py
 COPY apps/api/ ./apps/api/
 COPY agent/ ./agent/
+
+# M1：迁移脚本与一次性脚本（migrate 容器需要 alembic.ini + infra/alembic + scripts）
+COPY alembic.ini ./
+COPY infra/alembic/ ./infra/alembic/
+COPY scripts/ ./scripts/
 
 EXPOSE 8000
 

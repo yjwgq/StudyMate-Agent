@@ -1,7 +1,8 @@
 /* ============================================================
-   M0 阶段使用原生 CSS。
+   Personal Agent OS — 全局样式
+   M1：新增认证页与顶栏样式；聊天区沿用 M0 布局。
    Tailwind + shadcn/ui 会在后续里程碑构建正式 UI 时引入
-   （设计文档 v1.1 §12.2），M0 刻意保持零构建配置。
+   （设计文档 v1.1 §12.2），当前刻意保持零构建配置。
    ============================================================ */
 
 :root {
@@ -51,6 +52,8 @@ body {
   line-height: 1.65;
 }
 
+/* ---------------- 聊天布局（M0 沿用） ---------------- */
+
 .layout {
   display: flex;
   flex-direction: column;
@@ -75,6 +78,38 @@ body {
   margin: 4px 0 0;
   font-size: 12.5px;
   color: var(--muted);
+}
+
+.header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.linklike {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+.linklike:hover {
+  color: var(--fg);
+  border-color: var(--muted);
 }
 
 .stream {
@@ -177,4 +212,93 @@ body {
 
 .composer button.stop {
   background: var(--danger);
+}
+
+/* ---------------- 认证页（M1 新增） ---------------- */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 28px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-card h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth-card input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.auth-card input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.auth-card button {
+  margin-top: 4px;
+  padding: 10px 0;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-card button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.auth-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.auth-alt {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.auth-alt a {
+  color: var(--accent);
+  text-decoration: none;
 }

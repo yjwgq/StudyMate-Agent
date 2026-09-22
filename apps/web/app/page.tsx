@@ -1,18 +1,20 @@
 'use client';
 
 /**
- * M0 聊天页 —— 端到端最小闭环的前端一侧。
+ * M1 聊天页 —— 在 M0 端到端闭环之上接入认证与会话语义：
+ *   - 未登录 → 跳转 /login；401 → apiFetch 内部刷新重试，刷新失败跳登录；
+ *   - 请求带 Idempotency-Key（每次用户输入生成 UUID，§7.6）；
+ *   - 首条消息不带 conversation_id → 服务端建会话；
+ *     done 事件返回 conversation_id 后，本页后续消息都挂在同一会话上；
+ *   - 409（会话锁 / 幂等进行中）展示可读提示（B6 的前端表现）。
  *
- * 这个页面的唯一使命：**证明 SSE 流没有被任何中间层缓冲**。
- * 所以它刻意用原生 `fetch` + `ReadableStream` 手动解析 SSE，
- * 而不是用封装好的库 —— 出问题时能直接定位到是哪一层没吐数据。
- *
- * 后续演进（设计文档 v1.1 §12）：
- *   M5 → 换用 Vercel AI SDK 的自定义 transport，接入 tool_start / approval 等事件
- *   M6 → 加 KaTeX 公式渲染与降级角标
+ * 仍然手写 SSE 解析：出问题时能直接定位是哪一层没吐数据。
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { apiFetch, readableError } from '../lib/api';
+import { clearTokens, getEmail, isLoggedIn } from '../lib/auth';
 
 type Role = 'user' | 'assistant' | 'error';
 
@@ -27,15 +29,7 @@ interface SseEvent {
   data: Record<string, unknown>;
 }
 
-/**
- * 解析一个 SSE 事件块（不含结尾空行）。
- *
- * SSE 的块格式：
- *     event: token
- *     data: {"delta":"你"}
- *
- * 注意 data 可能跨多行，按规范要用 \n 拼回再解析。
- */
+/** 解析一个 SSE 事件块（不含结尾空行）。 */
 function parseSseBlock(block: string): SseEvent | null {
   let event = 'message';
   const dataLines: string[] = [];
@@ -63,12 +57,26 @@ let seq = 0;
 const nextId = () => `m${++seq}`;
 
 export default function ChatPage() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
 
+  const conversationRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
+
+  // 未登录 → 跳转 /login
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.replace('/login');
+      return;
+    }
+    setEmail(getEmail());
+    setReady(true);
+  }, [router]);
 
   // 有新内容时自动滚到底部
   useEffect(() => {
@@ -78,6 +86,11 @@ export default function ChatPage() {
 
   // 组件卸载时中断在途请求，避免内存泄漏
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  function logout() {
+    clearTokens();
+    router.push('/login');
+  }
 
   function appendToken(delta: string) {
     setMessages((prev) => {
@@ -91,8 +104,7 @@ export default function ChatPage() {
 
   function pushError(text: string) {
     setMessages((prev) => {
-      // 出错或被中断时，末尾通常留着一个还没吐字的 assistant 占位气泡，
-      // 先把它摘掉再追加错误气泡，否则界面上会挂一个空白气泡。
+      // 出错时，末尾通常留着一个还没吐字的 assistant 占位气泡，先摘掉
       const last = prev[prev.length - 1];
       const base =
         last && last.role === 'assistant' && last.content === '' ? prev.slice(0, -1) : prev;
@@ -108,16 +120,18 @@ export default function ChatPage() {
         break;
       }
       case 'error': {
-        // 后端把异常转成 error 事件而不是切断连接，
-        // 所以这里能拿到可读的错误信息 —— 这是验收项 A4 的核心。
-        // code 来自后端错误码字典（LLM_OFFLINE / INTERNAL / ...），必须透传，
-        // 验收项 A4 检查的正是页面上能看到 LLM_OFFLINE 这个标识。
         const code = typeof data.code === 'string' ? data.code : 'UNKNOWN';
         pushError(`[${code}] ${String(data.message ?? '未知错误')}`);
         break;
       }
-      case 'done':
+      case 'done': {
+        // 服务端建会话后回传 id：本页后续消息挂同一会话
+        const cid = data.conversation_id;
+        if (typeof cid === 'string' && cid && !conversationRef.current) {
+          conversationRef.current = cid;
+        }
         break;
+      }
       default:
         break;
     }
@@ -139,28 +153,34 @@ export default function ChatPage() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch('/api/v1/chat', {
+      const res = await apiFetch('/api/v1/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          content,
+          conversation_id: conversationRef.current,
+        }),
         signal: controller.signal,
       });
 
-      // 后端若在「建流之前」失败（如未配置 Key），返回的是普通 JSON 而非事件流
       if (!res.ok) {
-        const detail = await res.text().catch(() => '');
-        // 502/503/504：Caddy 还活着但 upstream(api) 已停 —— 验收项 A5 的场景，
-        // 页面必须显示 BACKEND_OFFLINE 而不是一句裸的 HTTP 502
-        if (res.status === 502 || res.status === 503 || res.status === 504) {
-          throw new Error(
-            `[BACKEND_OFFLINE] 后端不可达（HTTP ${res.status}）${detail ? ` — ${detail}` : ''}`,
-          );
+        // 409（会话锁/幂等）、401（刷新失败已跳登录）、其他 → 统一可读文案
+        if (res.status !== 401) {
+          pushError(await readableError(res));
         }
-        throw new Error(`后端返回 HTTP ${res.status}${detail ? ` — ${detail}` : ''}`);
+        return;
       }
       if (!res.body) {
-        throw new Error('响应没有 body，无法读取流');
+        pushError('响应没有 body，无法读取流');
+        return;
       }
+
+      // 服务端可能新建了会话：响应头直接带出（done 事件也会带，双保险）
+      const headerCid = res.headers.get('X-Conversation-Id');
+      if (headerCid && !conversationRef.current) conversationRef.current = headerCid;
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -185,8 +205,6 @@ export default function ChatPage() {
       if ((err as Error).name === 'AbortError') {
         pushError('已中断本次生成。');
       } else if (err instanceof TypeError) {
-        // fetch 抛 TypeError = 连 Caddy 的 TCP 都没建立（整个 compose 都停了），
-        // 同样归入 BACKEND_OFFLINE，与 A5 的语义保持一致
         pushError('[BACKEND_OFFLINE] 无法连接服务，请确认容器是否在运行。');
       } else {
         pushError(`请求失败：${(err as Error).message}`);
@@ -197,11 +215,21 @@ export default function ChatPage() {
     }
   }
 
+  if (!ready) return null;
+
   return (
     <div className="layout">
       <header className="header">
-        <h1>Personal Agent OS</h1>
-        <p>M0 · 端到端最小闭环（浏览器 → FastAPI → DeepSeek → SSE）</p>
+        <div className="header-row">
+          <div>
+            <h1>Personal Agent OS</h1>
+            <p>M1 · 多租户认证版（JWT / RLS / 会话锁 / 幂等）</p>
+          </div>
+          <div className="header-user">
+            <span>{email ?? '已登录'}</span>
+            <button className="linklike" onClick={logout}>退出</button>
+          </div>
+        </div>
       </header>
 
       <div className="stream" ref={streamRef}>

@@ -1,14 +1,17 @@
 # ============================================================
 #  Personal Agent OS — Python 依赖与工具配置
 # ============================================================
-#  依赖按里程碑递增：M0 只引入最小闭环必需的包，
-#  后续里程碑（M1 数据库、M2 检索、M4 Agent 等）再逐步补充。
+#  依赖按里程碑递增：
+#      M0：Web 接入层 + 模型调用（OpenAI 兼容）
+#      M1：+ SQLAlchemy/asyncpg/alembic（数据层）、redis（锁/幂等）、
+#          pyjwt/bcrypt（认证）、psycopg + langgraph-checkpoint-postgres
+#          （checkpoint 三表迁移，M4 起真正使用）
 #  版本只写下限约束，实际版本由 uv.lock 锁定。
 # ============================================================
 
 [project]
 name = "personal-agent-os"
-version = "0.1.0"
+version = "0.2.0"
 description = "面向个人用户的多用户 AI 助理平台：Agent 运行时 · 长期记忆 · 生产级 RAG · MCP 工具生态"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -20,8 +23,21 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-multipart>=0.0.9",      # M2 文件上传用；体积小，提前引入
-    # --- 模型调用（DeepSeek / 通义千问 均为 OpenAI 兼容接口）---
+    "email-validator>=2.1",         # pydantic EmailStr（注册接口）
+    # --- 模型调用（DeepSeek / 智谱 均为 OpenAI 兼容接口）---
     "openai>=1.40",
+    # --- 数据层（M1）---
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",         # 同步驱动：alembic / checkpoint 迁移用
+    # --- Redis（M1：会话锁 / 幂等；M9：Celery broker）---
+    "redis>=5.0",
+    # --- 认证（M1）---
+    "pyjwt>=2.8",
+    "bcrypt>=4.1",
+    # --- LangGraph checkpoint（M1 只用其建表迁移；运行时 M4 接入）---
+    "langgraph-checkpoint-postgres>=2.0",
 ]
 
 [dependency-groups]
@@ -30,7 +46,7 @@ dev = [
     "mypy>=1.11",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "httpx>=0.27",                  # FastAPI TestClient 依赖
+    "httpx>=0.27",                  # FastAPI TestClient / 测试请求
 ]
 
 # 本项目不从源码构建成 wheel，直接以源码运行（uv run uvicorn apps.api.main:app）
@@ -60,18 +76,25 @@ known-first-party = ["apps", "agent", "worker", "mcp_servers"]
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+# tests/ 与 tests/security/ 下各有 conftest.py，无 __init__.py；
+# 以项目根为包基，避免两个 conftest 被判定为同名模块
+explicit_package_bases = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-# 只列当前已存在的包。
-# 不要提前写入 worker / mcp_servers 等尚未创建的目录，否则 mypy 会以
-# "can't read file" 直接失败。新包落地时再追加。
-files = ["apps", "agent"]
+# 只列当前已存在的包。不要提前写入 worker / mcp_servers 等尚未创建的目录，
+# 否则 mypy 会以 "can't read file" 直接失败。新包落地时再追加。
+files = ["apps", "agent", "scripts"]
 
 # ------------------------------------------------------------
 # 测试
 # ------------------------------------------------------------
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# pytest-asyncio 1.x：整个测试会话共用一个事件循环 ——
+# engine 连接池（lru_cache 全局）与 session 级 fixture 必须与测试同 loop，
+# 否则第二个测试起会拿到绑定旧 loop 的连接，报 Event loop is closed。
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 # 让测试能 import apps.* —— 本项目是 virtual root（package = false），
 # 没有安装到 site-packages，必须显式把项目根加入 sys.path。

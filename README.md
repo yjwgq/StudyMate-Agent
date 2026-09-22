@@ -9,7 +9,9 @@
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
 | M0 | 端到端最小闭环（浏览器 → FastAPI → LLM → SSE 逐字回流） | ✅ 完成（2026-09-22 验收通过） |
-| M1 – M10 | 见施工计划 | 🚧 M1 进行中 |
+| M1 | 基础设施与多租户认证（compose 全量编排 / 16 张表迁移 / JWT+RLS / 会话锁 / 幂等） | ✅ 完成（2026-09-23 验收 B1–B8 通过） |
+| M2 | 知识库入库管线 | ⏭️ 下一个 |
+| M3 – M10 | 见施工计划 | ⏳ 未开始 |
 
 ## 文档
 
@@ -19,7 +21,7 @@
 | [`docs/design/PersonalAgent_设计文档_v1.1.md`](./docs/design/PersonalAgent_设计文档_v1.1.md) | 设计依据：架构、ADR、DDL、协议 |
 | [`docs/design/PersonalAgent_设计文档_评审报告.md`](./docs/design/PersonalAgent_设计文档_评审报告.md) | 设计评审：45 条问题与改进方案 |
 
-## 快速开始（M0）
+## 快速开始（M1）
 
 ### 1. 准备环境变量
 
@@ -27,33 +29,38 @@
 Copy-Item .env.example .env
 ```
 
-编辑 `.env`，**至少填写这两项**：
+编辑 `.env`，**M0 必填**：`LLM_API_KEY` / `LLM_MODEL`（注意与 `LLM_BASE_URL` 同源）；**M1 必填**：
 
-```ini
-LLM_API_KEY=<你的 DeepSeek API Key>
-LLM_MODEL=<登录控制台确认的当前可用模型名>
-```
-
-> `.env` 已被 `.gitignore` 忽略，不会进入版本库。
+- `POSTGRES_PASSWORD`：数据库密码（自定）
+- 三条 `DATABASE_URL*` 中的 `CHANGE_ME` → 替换为上面同一个密码值
+- `JWT_SECRET`：`openssl rand -hex 32` 生成（PowerShell 可用 Git Bash 或 WSL 执行）
 
 ### 2. 启动
 
 ```powershell
-docker compose -f infra/docker-compose.dev.yml up --build
+docker compose -f infra/docker-compose.dev.yml up -d --build
 ```
 
-首次启动需要拉取镜像并安装依赖，耗时较长属正常。
+服务链：postgres → migrate（alembic + checkpoint 建表）→ api（等迁移成功才启动）→ caddy/web。
 
 ### 3. 访问
 
 | 地址 | 用途 |
 |------|------|
-| http://localhost:8080 | 聊天页 |
+| http://localhost:8080 | 应用（未登录会跳转 /login） |
 | http://localhost:8080/api/v1/health | 存活检查 |
-| http://localhost:8080/api/v1/ready | 就绪检查（含 LLM 配置自检） |
+| http://localhost:8080/api/v1/ready | 就绪检查（LLM / JWT / DB / Redis） |
 | http://localhost:8080/api/v1/config | 查看当前配置（不回显密钥） |
 
-### 4. 仅启动后端（调试用）
+### 4. 跑测试
+
+```powershell
+uv sync
+uv run pytest tests/unit -v          # 单元测试（无需数据库）
+uv run pytest tests/security -v      # 安全集成测试（需要开发栈已启动）
+```
+
+### 5. 仅启动后端（调试用）
 
 ```powershell
 uv sync
@@ -65,23 +72,24 @@ uv run uvicorn apps.api.main:app --reload --port 8000
 完整结构见 [`项目实施计划.md` §3.2](./项目实施计划.md)。核心分层：
 
 ```
-apps/api/      FastAPI 接入层
-apps/web/      Next.js 前端
+apps/api/      FastAPI 接入层（core / api.v1 / repositories）
+apps/web/      Next.js 前端（聊天 / 登录 / 注册）
 agent/         Agent 运行时（图编排、工具、记忆、检索、护栏）
 mcp_servers/   自建 MCP 工具服务
 worker/        Celery 异步任务
-infra/         容器编排、镜像、迁移
+infra/         容器编排、镜像、迁移（alembic）、数据库初始化
 evals/         评测集与评测脚本
+scripts/       一次性脚本（checkpoint 建表等）
 ```
 
 ## 技术栈
 
-Python 3.12 · FastAPI · LangGraph · PostgreSQL 16 + pgvector · Redis · Celery · Next.js 15 · Docker Compose
+Python 3.12 · FastAPI · SQLAlchemy/asyncpg · Alembic · Redis · LangGraph · PostgreSQL 16 + pgvector · Next.js 15 · Docker Compose
 
 **推理全程走云端**（不部署本地模型）：
 
 | 角色 | 服务商 |
 |------|--------|
-| LLM | DeepSeek |
+| LLM | DeepSeek / 智谱（OpenAI 兼容，以 `.env` 配置为准） |
 | Embedding | 通义千问（DashScope 兼容模式，1024 维） |
 | Reranker | bge-reranker-v2-m3 |
