@@ -1,0 +1,81 @@
+# ============================================================
+#  Personal Agent OS — 开发编排（M0：端到端最小闭环）
+# ============================================================
+#  用法：
+#      docker compose -f infra/docker-compose.dev.yml up --build
+#      浏览器打开 http://localhost:8080
+#
+#  两个约定：
+#      1. 构建上下文是【项目根目录】，所以 build.context 写 ..
+#      2. 环境变量从项目根的 .env 读取（env_file: ../.env）
+#
+#  ⚠️ .env 必须存在，否则 `docker compose up` 会直接报
+#     "env file ... not found" 并退出。这是刻意的 ——
+#     宁可启动前就失败，也不要带着空 Key 起来、等到第一个请求才报错。
+#     准备方式：在项目根目录执行  Copy-Item .env.example .env  然后填写。
+#
+#  服务随里程碑递增：
+#      M0 → caddy · api · web
+#      M1 → + postgres · redis
+#      M9 → + worker · beat
+# ============================================================
+
+name: personal-agent-os-dev
+
+services:
+  # ------------------------------------------------------------
+  #  反向代理：统一入口
+  #  浏览器只访问 8080；/api/* 转后端，其余转前端
+  # ------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  后端（FastAPI）
+  # ------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.api
+    env_file:
+      - ../.env
+    environment:
+      # 容器内直连不需要走代理
+      NO_PROXY: localhost,127.0.0.1,api,web
+    expose:
+      - "8000"
+    healthcheck:
+      # 用容器自带的 python 探测，避免为 M0 额外引入 curl
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status==200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  前端（Next.js 15）
+  # ------------------------------------------------------------
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.web
+    environment:
+      NODE_ENV: production
+    expose:
+      - "3000"
+    restart: unless-stopped

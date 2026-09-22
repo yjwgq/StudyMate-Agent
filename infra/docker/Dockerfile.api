@@ -1,0 +1,37 @@
+# ============================================================
+#  API 镜像 —— FastAPI 后端
+# ============================================================
+#  构建上下文 = 项目根目录
+#      docker build -f infra/docker/Dockerfile.api .
+# ============================================================
+#  分层策略：依赖与代码分开 COPY。
+#  只要 pyproject.toml 没变，改代码不会触发重装依赖。
+# ============================================================
+
+FROM python:3.12-slim
+
+# uv：直接取官方镜像里的静态二进制，比 pip 安装快且版本可控
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+# ---- 依赖层（命中缓存的前提：pyproject.toml 未变）----
+COPY pyproject.toml ./
+RUN uv sync --no-dev
+
+# ---- 代码层 ----
+# 刻意逐目录 COPY，而不是 COPY apps/ ./apps/：
+# 因为 apps/web 是 Node 工程，整个拷进来会让镜像白白变大。
+# 后续里程碑在此追加：COPY worker/ ./worker/  ·  COPY mcp_servers/ ./mcp_servers/
+COPY apps/__init__.py ./apps/__init__.py
+COPY apps/api/ ./apps/api/
+COPY agent/ ./agent/
+
+EXPOSE 8000
+
+CMD ["uv", "run", "--no-dev", "uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

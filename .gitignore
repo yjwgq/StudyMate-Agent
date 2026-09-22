@@ -1,62 +1,59 @@
 # ============================================================
-# StudyMate Agent — Git 忽略规则
+#  Personal Agent OS — Git 忽略规则
 # ============================================================
 
-# ---- Python 编译产物 ----
+# ---- Python ----
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
+*.egg-info/
+.eggs/
+build/
+dist/
 
 # ---- 虚拟环境 ----
+# 注意：uv.lock 要提交（锁文件是复现构建的前提），不要忽略
 .venv/
 venv/
-env/
 ENV/
 
 # ---- uv 缓存 ----
 .uv_cache/
-uv_cache/
 
-# ---- IDE 配置 ----
-.idea/
-.vscode/
-.trae/
-*.iml
-*.iws
-*.ipr
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# ---- 环境变量（含密钥，禁止提交） ----
+# ---- 环境变量（含密钥，禁止提交）----
 .env
 .env.local
 .env.*.local
 
-# ---- 向量数据库（大文件，运行时生成，可重建） ----
-chroma_db/
+# ---- 测试与工具缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
-# ---- 日志文件 ----
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+
+# ---- 运行时数据（compose 卷挂载点，可重建）----
+data/
 logs/
 *.log
-*.log.*
 
-# ---- HuggingFace / datasets 缓存 ----
-datasets/hf_cache/
-datasets/*_raw/
-!datasets/*_raw/.gitkeep
-
-# ---- 用户上传的临时文档（保留 uploads/.gitkeep 占位） ----
-datasets/uploads/*
-!datasets/uploads/.gitkeep
-
-# ---- 测试文件（单元测试、联调脚本，不提交到仓库） ----
-test_*.py
-*_test.py
-
-# ---- 演示 / 草稿脚本 ----
-*_demo.py
-graph/graph_demo.py
-
-# ---- 系统临时文件 ----
+# ---- 系统 ----
 .DS_Store
 Thumbs.db
 *.tmp
