@@ -32,6 +32,8 @@ COPY apps/api/ ./apps/api/
 COPY agent/ ./agent/
 # M2：Celery ingest worker 与 api 共用本镜像
 COPY worker/ ./worker/
+# M4：MCP 工具 server（api 进程按需 spawn 子进程）
+COPY mcp_servers/ ./mcp_servers/
 
 # M1：迁移脚本与一次性脚本（migrate 容器需要 alembic.ini + infra/alembic + scripts）
 COPY alembic.ini ./

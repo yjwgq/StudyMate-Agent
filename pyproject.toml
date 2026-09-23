@@ -42,6 +42,9 @@ dependencies = [
     "jieba>=0.42",
     "celery[redis]>=5.4",
     "langfuse>=4.15.4",
+    "langgraph>=1.2.12",
+    "restrictedpython>=8.5",
+    "mcp[cli]<2",
 ]
 
 [dependency-groups]
