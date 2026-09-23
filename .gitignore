@@ -58,3 +58,6 @@ logs/
 Thumbs.db
 *.tmp
 *.temp
+
+# ZCode 工具产物（plan 草稿等）
+.zcode/

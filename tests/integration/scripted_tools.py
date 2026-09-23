@@ -31,20 +31,26 @@ class ScriptedLLM:
         self.complete_calls.append({"span": span_name, "messages": messages})
         if span_name == "planner":
             return LLMResult(text=self.plan, usage={"total_tokens": 12}, finish_reason="stop")
-        # react：按 step 关键词路由
+        # react：按 step 关键词路由；索引进度 = 历史里的 tool 结果条数。
+        # 不能 pop（有状态）：LangGraph 在 interrupt 恢复时会**从头重跑节点** ——
+        # 已推进的队列会让重跑直接返回结论、跳过审批后的工具执行
+        # （M5 验收实锤：approvals 一直停在 pending）。真实 LLM 依据历史响应，
+        # 因此按「该步已产生的 tool 结果条数」索引，重跑天然幂等。
         user_texts = [m.get("content", "") for m in messages if m.get("role") == "user"]
         joined = " ".join(user_texts)
+        tool_count = sum(1 for m in messages if m.get("role") == "tool")
         for key, queue in self.scripts.items():
             if key in joined:
-                if queue:
-                    item = queue.pop(0)
-                    usage = {"total_tokens": 21}
-                    if isinstance(item, str):
-                        return LLMResult(text=item, usage=usage, finish_reason="stop")
-                    return LLMResult(tool_calls=[item], usage=usage, finish_reason="tool_calls")
-                return LLMResult(
-                    text=f"[{key}] 脚本耗尽，给出结论。", usage=usage, finish_reason="stop"
-                )
+                usage = {"total_tokens": 21}
+                index = min(tool_count, len(queue))
+                if index >= len(queue):
+                    return LLMResult(
+                        text=f"[{key}] 脚本耗尽，给出结论。", usage=usage, finish_reason="stop"
+                    )
+                item = queue[index]
+                if isinstance(item, str):
+                    return LLMResult(text=item, usage=usage, finish_reason="stop")
+                return LLMResult(tool_calls=[item], usage=usage, finish_reason="tool_calls")
         raise AssertionError(f"ScriptedLLM: 未匹配任何 step 脚本：{joined[:80]}")
 
     async def stream(self, messages, *, temperature=0.3, span_name="llm"):

@@ -81,13 +81,19 @@ def assemble_graph(*, checkpointer: BaseCheckpointSaver | None = None) -> Any:
 # ---------------- checkpointer ----------------
 
 _saver: Any = None
-_saver_cm: Any = None
+_saver_pool: Any = None
 _saver_ready = False
 
 
 async def get_checkpointer() -> BaseCheckpointSaver | None:
-    """惰性创建 AsyncPostgresSaver（进程级单例）；未配置/失败返回 None（图照常运行）。"""
-    global _saver, _saver_ready
+    """惰性创建 AsyncPostgresSaver（**连接池**）；未配置/失败返回 None（图照常运行）。
+
+    为什么必须用连接池（M5 实锤）：`from_conn_string` 只开**一条** psycopg
+    连接，不同会话的轮次并发跑图时会互相踩踏 → `OperationalError: the
+    connection is closed` → 图静默失败（turn 显示 completed 但答案为空）。
+    池化后每个操作独立取连接，并发安全。
+    """
+    global _saver, _saver_pool, _saver_ready
     if _saver_ready:
         return _saver
     _saver_ready = True
@@ -98,16 +104,23 @@ async def get_checkpointer() -> BaseCheckpointSaver | None:
         if not dsn:
             return None
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from psycopg_pool import AsyncConnectionPool
 
         # asyncpg URL → psycopg URL
         dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
-        # from_conn_string 返回 async 上下文管理器：进入后拿到长生命周期连接池
-        saver_cm = AsyncPostgresSaver.from_conn_string(dsn)
-        saver = await saver_cm.__aenter__()
-        await saver.setup()  # 幂等（checkpoint_migrations 版本管理）
+        pool = AsyncConnectionPool(
+            conninfo=dsn, min_size=1, max_size=8, open=False,
+            kwargs={"autocommit": True, "prepare_threshold": 0},
+        )
+        await pool.open(wait=True, timeout=10)
+        saver = AsyncPostgresSaver(pool)  # type: ignore[arg-type]
+        try:
+            await saver.setup()  # 幂等；建表由 migrate 负责，此处仅供本地开发
+        except Exception as exc:  # noqa: BLE001
+            logger.info("checkpoint setup 跳过（表已由迁移创建）：%s", exc)
         _saver = saver
-        _saver_cm = saver_cm
-        logger.info("checkpointer ready (AsyncPostgresSaver)")
+        _saver_pool = pool
+        logger.info("checkpointer ready (AsyncPostgresSaver + pool)")
     except Exception:  # noqa: BLE001 —— 无 checkpoint 图仍可运行（降级）
         logger.warning("checkpointer 初始化失败，图将无持久化运行", exc_info=True)
         _saver = None
@@ -115,14 +128,14 @@ async def get_checkpointer() -> BaseCheckpointSaver | None:
 
 
 async def close_checkpointer() -> None:
-    global _saver, _saver_cm, _saver_ready
-    if _saver_cm is not None:
+    global _saver, _saver_pool, _saver_ready
+    if _saver_pool is not None:
         try:
-            await _saver_cm.__aexit__(None, None, None)
+            await _saver_pool.close()
         except Exception:  # noqa: BLE001
-            logger.debug("checkpointer 释放失败（忽略）", exc_info=True)
+            logger.debug("checkpointer 池释放失败（忽略）", exc_info=True)
     _saver = None
-    _saver_cm = None
+    _saver_pool = None
     _saver_ready = False
 
 
@@ -146,30 +159,37 @@ async def run_agent_turn(
     conversation_id: str,
     message_id: str = "",
     trace_id: str = "",
-    content: str,
+    content: str = "",
     token_budget: int = 30000,
     max_parallel: int = 3,
     groundedness_enabled: bool = True,
     checkpointer: BaseCheckpointSaver | None = None,
+    resume_command: Any = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    """执行一轮 Agent，产出事件流。
+    """执行一轮 Agent（或恢复被审批暂停的图），产出事件流。
 
     产出两类项：
         ("event", {type: citations|token|notice|degraded, ...})  —— 桥接 SSE
         ("final", 最终 state 摘要 dict)                          —— 流结束时的最后一个
+
+    resume_command 非空时忽略 content：输入是 Command(resume=决策)，
+    从 thread 的 checkpoint 续跑（M5-2，F3 的「从中断处继续」）。
     """
     graph = assemble_graph(checkpointer=checkpointer) if checkpointer is not None else build_graph()
-    graph_input: dict[str, Any] = {
-        "messages": [{"role": "user", "content": content}],
-        "user_id": user_id,
-        "conversation_id": conversation_id,
-        "message_id": message_id,
-        "trace_id": trace_id,
-        "mode": "auto",
-        "max_parallel": max_parallel,
-        "token_budget": token_budget,
-        "degraded": [],
-    }
+    if resume_command is not None:
+        graph_input: Any = resume_command
+    else:
+        graph_input = {
+            "messages": [{"role": "user", "content": content}],
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "trace_id": trace_id,
+            "mode": "auto",
+            "max_parallel": max_parallel,
+            "token_budget": token_budget,
+            "degraded": [],
+        }
     config = {
         "configurable": {
             "thread_id": conversation_id,
@@ -201,6 +221,8 @@ async def run_agent_turn(
 
 def _summarize(state: dict[str, Any]) -> dict[str, Any]:
     """最终 state 的落库摘要（runner 消费）。"""
+    if not state:
+        return {}
     citations = state.get("citations") or []
     return {
         "answer": state.get("answer") or "",
@@ -215,4 +237,22 @@ def _summarize(state: dict[str, Any]) -> dict[str, Any]:
             for s in (state.get("plan") or [])
         ],
         "error": state.get("error"),
+        # M5-2：图因 L2 审批暂停时，提取 interrupt 载荷（approval_id 等）
+        "awaiting_approval": _extract_interrupt(state),
     }
+
+
+def _extract_interrupt(state: dict[str, Any]) -> dict[str, Any] | None:
+    """从 state 的 __interrupt__ 通道提取审批请求信息。"""
+    raw = state.get("__interrupt__")
+    if not raw:
+        return None
+    try:
+        items = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+        for it in items:
+            value = getattr(it, "value", it)
+            if isinstance(value, dict) and value.get("type") == "approval":
+                return value
+    except Exception:  # noqa: BLE001
+        logger.debug("interrupt 提取失败", exc_info=True)
+    return None

@@ -14,6 +14,7 @@
       模拟 worker 的合法跨租户写入）；RLS 探测走 app_api 连接。
 """
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -139,3 +140,58 @@ async def register_and_login(client: httpx.AsyncClient, email: str | None = None
 
 def auth_header(tokens: dict) -> dict[str, str]:
     return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+
+# ---------------- M5 两步流辅助 ----------------
+
+def _parse_sse_text(raw: str) -> list[tuple[str, dict]]:
+    events = []
+    for block in raw.split("\n\n"):
+        if not block.strip():
+            continue
+        event, data_lines = "message", []
+        for line in block.split("\n"):
+            line = line.rstrip("\r")
+            if line.startswith("event:"):
+                event = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.split(":", 1)[1].lstrip(" "))
+        if data_lines:
+            events.append((event, json.loads("\n".join(data_lines))))
+    return events
+
+
+async def submit_and_collect(
+    client: httpx.AsyncClient,
+    payload: dict,
+    headers: dict,
+) -> tuple[httpx.Response, list[tuple[str, dict]]]:
+    """M5 语义：POST 投递 → 订阅 stream 收集事件直到 done。
+
+    幂等重放（响应是 SSE）与普通投递（响应是 JSON + stream_url）两种形态统一处理。
+    返回 (POST 原始响应, 事件列表)。
+    """
+    r = await client.post("/api/v1/chat", json=payload, headers=headers)
+    content_type = r.headers.get("content-type", "")
+    if content_type.startswith("text/event-stream"):
+        # 幂等重放 / 错误重放：响应本身就是 SSE
+        return r, _parse_sse_text(r.text)
+    assert r.status_code == 200, f"submit failed: {r.status_code} {r.text[:300]}"
+    mid = r.json()["data"]["message_id"]
+
+    events: list[tuple[str, dict]] = []
+    async with client.stream(
+        "GET", f"/api/v1/chat/{mid}/stream", headers=headers
+    ) as resp:
+        assert resp.status_code == 200
+        buffer = ""
+        async for chunk in resp.aiter_text():
+            buffer += chunk
+            while "\n\n" in buffer:
+                block, buffer = buffer.split("\n\n", 1)
+                parsed = _parse_sse_text(block)
+                for e, d in parsed:
+                    events.append((e, d))
+                    if e == "done":
+                        return r, events
+    return r, events

@@ -12,6 +12,8 @@
 import logging
 from typing import Any
 
+from pydantic import BaseModel
+
 from agent.tools.base import ToolError, ToolMeta
 
 logger = logging.getLogger(__name__)
@@ -106,8 +108,35 @@ def get_policy_registry() -> PolicyRegistry:
     return _policy_registry
 
 
+class _ExternalRecipientRule:
+    """参数级升级（§7.5 原例）：收件人含非内部域 → 升级 L2 走审批。
+
+    内部域白名单 = test.local（开发约定）。命中即升级（不 deny）——
+    外发本身合法，只是需要人确认。
+    """
+
+    INTERNAL_SUFFIX = "test.local"
+
+    def check(self, args: BaseModel) -> tuple[bool, str]:
+        to = getattr(args, "to", None) or []
+        external = [r for r in to if not str(r).lower().endswith("@" + self.INTERNAL_SUFFIX)]
+        if external:
+            return True, f"收件人含外部域：{', '.join(external[:3])}"
+        return False, ""
+
+
+class _BulkRecipientRule:
+    """群发上限：> 5 人直接拒绝（聊天助手不做群发）。"""
+
+    def check(self, args: BaseModel) -> tuple[bool, str]:
+        to = getattr(args, "to", None) or []
+        if len(to) > 5:
+            return True, f"收件人 {len(to)} 人，超过群发上限 5 人"
+        return False, ""
+
+
 def default_policies() -> dict[str, ToolPolicy]:
-    """M4 内置工具的本地策略（风险等级以本地为准，不信任 meta 自述）。"""
+    """M4/M5 工具的本地策略（风险等级以本地为准，不信任 meta 自述）。"""
     return {
         # 知识库检索：只读
         "retrieval": ToolPolicy(risk_level_override=0),
@@ -122,6 +151,14 @@ def default_policies() -> dict[str, ToolPolicy]:
         # web 搜索：外发查询词到第三方 → 本地定 L0（查询词非敏感；若含 PII 由
         # 上游 guard_input 负责脱敏，M9 落地）——显式声明而非默认值
         "search": ToolPolicy(risk_level_override=0),
+        # 发邮件：写操作 L1；**参数级升级**：收件人含外部域 → L2 走审批；
+        # 群发 > 5 人 → deny（§7.5 的教科书例子）
+        "send_email": ToolPolicy(
+            risk_level_override=1,
+            escalate_checks=[_ExternalRecipientRule()],
+            deny_checks=[_BulkRecipientRule()],
+        ),
+        "list_outbox": ToolPolicy(risk_level_override=0),
     }
 
 

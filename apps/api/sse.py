@@ -35,15 +35,21 @@ SSE_HEADERS: dict[str, str] = {
 SSE_MEDIA_TYPE = "text/event-stream"
 
 
-def sse_event(event: str, data: dict[str, Any]) -> str:
+def sse_event(event: str, data: dict[str, Any], event_id: str | None = None) -> str:
     """把一条事件序列化为 SSE 文本块。
 
     Args:
         event: 事件名，见本模块顶部的事件常量。
         data:  事件负载，会被序列化为单行 JSON。
+        event_id: 可选的 SSE 事件 id（Redis Stream entry id）。浏览器 EventSource
+            会自动把它作为 Last-Event-ID 在重连时回传；自研 fetch 流也靠它续读
+            （§7.7 第 3/4 条）。**M5 验收实锤**：不输出 id 行时，审批暂停后再
+            resume 的订阅只能从 0 读，会立刻撞上上一轮的 done，误判
+            「续跑没执行」。
 
     Returns:
-        形如 ``event: token\\ndata: {"delta":"你"}\\n\\n`` 的字符串。
+        形如 ``id: 1790-0\\nevent: token\\ndata: {"delta":"你"}\\n\\n`` 的字符串。
     """
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    return f"event: {event}\ndata: {payload}\n\n"
+    id_line = f"id: {event_id}\n" if event_id else ""
+    return f"{id_line}event: {event}\ndata: {payload}\n\n"

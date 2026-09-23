@@ -24,7 +24,7 @@ from typing import Any
 from agent.graph.budget import BudgetState, compress_history, estimate_messages_tokens
 from agent.graph.schemas import Chunk, Citation
 from agent.llm import AgentLLM
-from agent.tools.base import ToolCtx, ToolError, ToolResult
+from agent.tools.base import ApprovalInterrupt, ToolCtx, ToolError, ToolResult
 from agent.tools.builtin.retrieval_tool import parse_hits_from_result
 from agent.tools.registry import ToolRegistry
 
@@ -106,6 +106,142 @@ def _hits_to_state(hits: list[dict[str, Any]], *, start_n: int) -> tuple[list[Ci
     return citations, chunks
 
 
+async def _complete_with_memo(
+    llm: Any,
+    messages: list[dict[str, Any]],
+    *,
+    tools_schema: list[dict[str, Any]],
+    ctx: ToolCtx,
+    step_id: int,
+    round_no: int,
+) -> Any:
+    """ReAct 决策记忆化（M5 的关键正确性机制）。
+
+    为什么必须有（F1/F3 实锤）：LangGraph 在 resume 时**从头重跑节点** ——
+    LLM 会被再次调用，temperature>0 时同样的历史可能产出**不同参数**的
+    工具调用，导致：① 严格参数匹配找不到已批准的审批 → 再次暂停（死循环）；
+    ② 更危险 —— 批准的是 A 参数、实际执行 B 参数。
+
+    做法：以 (会话, 步骤, 轮次, 完整消息列表) 的哈希为键缓存首次决策
+    （TTL 1h，Redis）。重放/重跑命中同一决策 → 参数逐字节一致 →
+    既能匹配到已批准审批，也保证「批准什么就执行什么」。Redis 不可用时
+    退化为直接调用（不阻断主流程）。
+    """
+    import hashlib
+    import json as _json
+
+    redis = (ctx.extra or {}).get("redis")
+    key = None
+    if redis is not None:
+        material = _json.dumps(
+            {
+                "c": ctx.conversation_id,
+                "s": step_id,
+                "r": round_no,
+                "m": messages,
+                "t": [t.get("function", {}).get("name") for t in tools_schema],
+            },
+            ensure_ascii=False, sort_keys=True, default=str,
+        )
+        key = "react_decision:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+        try:
+            raw = await redis.get(key)
+            if raw:
+                data = _json.loads(raw)
+                from agent.llm import LLMResult, ToolCall
+
+                return LLMResult(
+                    text=data.get("text") or "",
+                    tool_calls=[
+                        ToolCall(id=tc.get("id", ""), name=tc["name"], arguments=tc.get("arguments") or {})
+                        for tc in (data.get("tool_calls") or [])
+                    ],
+                    usage=data.get("usage") or {},
+                    finish_reason=data.get("finish_reason") or "",
+                )
+        except Exception:  # noqa: BLE001 —— 缓存故障不阻断
+            logger.warning("决策缓存读取失败（忽略）", exc_info=True)
+
+    result = await llm.complete(messages, tools=tools_schema or None, span_name="react")
+    if redis is not None and key:
+        try:
+            import json as _json2
+
+            await redis.set(
+                key,
+                _json2.dumps(
+                    {
+                        "text": result.text,
+                        "tool_calls": [
+                            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                            for tc in result.tool_calls
+                        ],
+                        "usage": result.usage,
+                        "finish_reason": result.finish_reason,
+                    },
+                    ensure_ascii=False,
+                ),
+                ex=3600,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("决策缓存写入失败（忽略）", exc_info=True)
+    return result
+
+
+async def _invoke_with_approval(
+    registry: "ToolRegistry",
+    tool_name: str,
+    arguments: dict[str, Any],
+    ctx: ToolCtx,
+    step_id: int,
+    round_no: int,
+) -> ToolResult:
+    """调工具，命中 L2 时经 LangGraph interrupt() 走人工审批（M5-2，§7.3）。
+
+    流程：
+        registry.invoke → ApprovalInterrupt（approvals 已落 pending 行）
+          → interrupt({...}) 暂停整张图（checkpoint 保存，进程可以死 —— F3）
+        决策回流（审批 API 以 Command(resume=decision) 恢复，interrupt 返回决策）：
+          approved → 带 approved_approval_id 重调 invoke（registry 校验后放行，
+                      执行完回写 approvals.executed）
+          rejected → Observation「审批拒绝」回灌模型 → 替代回答（F2）
+
+    interrupt() 必须在 LangGraph 节点上下文里调用；图外（单测直跑）会抛
+    RuntimeError —— 由 except 兜底转成 ToolError（无审批运行时的降级语义）。
+    """
+    call_ctx = dc_replace(ctx, step_id=step_id, round=round_no)
+    try:
+        return await registry.invoke(tool_name, arguments, call_ctx)
+    except ApprovalInterrupt as ap:
+        from langgraph.types import interrupt
+
+        decision: dict[str, Any] = interrupt(
+            {
+                "type": "approval",
+                "approval_id": ap.approval_id,
+                "tool": ap.tool_name,
+                "args": ap.tool_args,
+                "risk_level": ap.risk_level,
+                "reason": ap.reason,
+            }
+        )
+        approved = bool(decision.get("approved"))
+        note = str(decision.get("note") or ("已批准" if approved else "用户拒绝"))
+        if approved:
+            approved_ctx = dc_replace(
+                ctx, step_id=step_id, round=round_no,
+                extra={**ctx.extra, "approved_approval_id": ap.approval_id},
+            )
+            result = await registry.invoke(tool_name, arguments, approved_ctx)
+            result_content = "[审批通过] " + note + "\n" + result.content
+            return result.model_copy(update={"content": result_content})
+        return ToolResult(
+            ok=False,
+            content=f"[审批拒绝] 工具 {tool_name} 未执行：{note}。请改用其他方式，或如实告知用户该操作无法完成。",
+            error_code="APPROVAL_REJECTED",
+        )
+
+
 async def run_react_step(
     *,
     llm: AgentLLM,
@@ -143,7 +279,10 @@ async def run_react_step(
             step_desc=step_desc, history=history, tools_schema=tools_schema
         )
         try:
-            result = await llm.complete(messages, tools=tools_schema or None, span_name="react")
+            result = await _complete_with_memo(
+                llm, messages, tools_schema=tools_schema,
+                ctx=ctx, step_id=step_id, round_no=round_no,
+            )
         except Exception as exc:  # noqa: BLE001 —— 模型失败终止本 step
             outcome.error = f"模型调用失败：{exc}"
             return outcome
@@ -187,8 +326,8 @@ async def run_react_step(
             seen_calls.add(fingerprint)
 
             try:
-                tool_result: ToolResult = await registry.invoke(
-                    tc.name, tc.arguments, dc_replace(ctx, step_id=step_id, round=round_no)
+                tool_result = await _invoke_with_approval(
+                    registry, tc.name, tc.arguments, ctx, step_id, round_no
                 )
                 consecutive_failures = 0 if tool_result.ok else consecutive_failures + 1
                 observation = tool_result.content

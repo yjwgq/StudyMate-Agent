@@ -61,6 +61,13 @@ async def chat_once(
         headers=send_headers,
         json={"content": content},
     )
+    # M5：执行与传输解耦 —— POST 返回 {message_id, stream_url}（JSON），
+    # 事件经 GET /chat/{mid}/stream 订阅；幂等重放仍直接返回 SSE。
+    if not r.headers.get("content-type", "").startswith("text/event-stream"):
+        r.raise_for_status()
+        mid = r.json()["data"]["message_id"]
+        req = client.build_request("GET", f"{BASE}/api/v1/chat/{mid}/stream", headers=headers)
+        r = await client.send(req, stream=True)
     buf = ""
     async for chunk in r.aiter_bytes():
         buf += chunk.decode("utf-8", errors="replace")

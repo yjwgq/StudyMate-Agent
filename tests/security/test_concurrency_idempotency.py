@@ -20,6 +20,7 @@ from tests.security.conftest import (
     auth_header,
     insert_conversation_for,
     register_and_login,
+    submit_and_collect,
 )
 
 
@@ -113,12 +114,23 @@ async def test_b6_concurrent_same_conversation_conflicts(client, app, worker_eng
                 headers={**headers, "Idempotency-Key": key},
             )
 
-        task1 = asyncio.create_task(send_once(f"b6-{uuid.uuid4().hex}"))
-        # 等 task1 拿到锁并进入模型调用（轮询 fake.calls）
-        for _ in range(100):
+        # M5 两步流：POST 返回 JSON（后台任务 gated），订阅 stream 收集事件
+        async def submit_once(key: str):
+            r, events = await submit_and_collect(
+                client,
+                {"content": "数到十", "conversation_id": conv_id},
+                {**headers, "Idempotency-Key": key},
+            )
+            return r, events
+
+        task1 = asyncio.create_task(submit_once(f"b6-{uuid.uuid4().hex}"))
+        # 等 task1 拿到锁并进入模型调用（轮询 fake.calls）。
+        # 首次请求要等工具注册表初始化（MCP 工具发现 = spawn 多个子进程），
+        # 轮询上限放宽到 40s。
+        for _ in range(200):
             if fake.calls >= 1:
                 break
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)
         assert fake.calls == 1, "第一条请求未进入模型调用，锁场景不成立"
 
         response2 = await send_once(f"b6-{uuid.uuid4().hex}")
@@ -127,10 +139,11 @@ async def test_b6_concurrent_same_conversation_conflicts(client, app, worker_eng
         assert body["error"]["code"] == "CONFLICT"
         assert "Retry-After" in response2.headers
 
-        # 放行第一条，等待其正常完成（锁释放）
+        # 放行第一条，等待其正常完成（后台任务释放锁，stream 收到 done）
         fake.gate.set()
-        response1 = await task1
+        response1, events1 = await task1
         assert response1.status_code == 200, response1.text
+        assert [e for e, _ in events1 if e == "done"], "第一条流未正常收尾"
     finally:
         app.dependency_overrides.pop(get_llm_client, None)
 
@@ -146,13 +159,12 @@ async def test_b7_idempotency_key_replays_without_side_effects(client, app, work
         headers = {**auth_header(tokens), "Content-Type": "application/json"}
         key = f"b7-{uuid.uuid4().hex}"
 
-        r1 = await client.post(
-            "/api/v1/chat",
-            json={"content": "用一句话解释什么是 RAG", "conversation_id": conv_id},
-            headers={**headers, "Idempotency-Key": key},
+        r1, events1 = await submit_and_collect(
+            client,
+            {"content": "用一句话解释什么是 RAG", "conversation_id": conv_id},
+            {**headers, "Idempotency-Key": key},
         )
         assert r1.status_code == 200, r1.text
-        events1 = _parse_sse(r1.text)
         done1 = [d for e, d in events1 if e == "done"][0]
         assert done1["replayed"] is False
 
@@ -183,12 +195,12 @@ async def test_b7_idempotency_key_replays_without_side_effects(client, app, work
         )
 
         # 用不同 key 再发一次：正常执行（不受上次 key 影响，模型再次被调用）
-        r3 = await client.post(
-            "/api/v1/chat",
-            json={"content": "再来一条", "conversation_id": conv_id},
-            headers={**headers, "Idempotency-Key": f"b7-{uuid.uuid4().hex}"},
+        _, events3 = await submit_and_collect(
+            client,
+            {"content": "再来一条", "conversation_id": conv_id},
+            {**headers, "Idempotency-Key": f"b7-{uuid.uuid4().hex}"},
         )
-        assert r3.status_code == 200
+        assert [e for e, _ in events3 if e == "done"]
         assert fake.calls > calls_before_replay
     finally:
         app.dependency_overrides.pop(get_llm_client, None)

@@ -133,6 +133,109 @@ async def insert_message(
     return dict(row.mappings().one())
 
 
+async def update_message(
+    session: AsyncSession,
+    *,
+    message_id: UUID,
+    user_id: UUID,
+    status: str | None = None,
+    content: str | None = None,
+    citations: list[dict[str, Any]] | None = None,
+    degraded: dict[str, Any] | None = None,
+    token_usage: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+    superseded_by: UUID | None = None,
+) -> dict[str, Any] | None:
+    """消息状态机更新（M5-4，§6.4 / §7.7）。
+
+    streaming → completed / interrupted / cancelled / failed；
+    重新生成时旧消息 superseded_by = 新消息 id（不原地覆盖，§7.7 第 7 条）。
+    content=citation 等字段 None 表示不更新（区分「置 NULL」用空串/空 dict）。
+    """
+    sets = ["updated_at = now()"]
+    params: dict[str, Any] = {"mid": str(message_id), "uid": str(user_id)}
+    if status is not None:
+        sets.append("status = :status")
+        params["status"] = status
+    if content is not None:
+        sets.append("content = :content")
+        params["content"] = content
+    if citations is not None:
+        sets.append("citations = CAST(:citations AS JSONB)")
+        params["citations"] = json.dumps(citations, ensure_ascii=False)
+    if degraded is not None:
+        sets.append("degraded = CAST(:degraded AS JSONB)")
+        params["degraded"] = json.dumps(degraded, ensure_ascii=False)
+    if token_usage is not None:
+        sets.append("token_usage = CAST(:usage AS JSONB)")
+        params["usage"] = json.dumps(token_usage)
+    if error is not None:
+        sets.append("error = CAST(:err AS JSONB)")
+        params["err"] = json.dumps(error, ensure_ascii=False)
+    if superseded_by is not None:
+        sets.append("superseded_by = :sup")
+        params["sup"] = str(superseded_by)
+    row = await session.execute(
+        text(f"""
+            UPDATE messages SET {", ".join(sets)}
+            WHERE id = :mid AND user_id = :uid
+            RETURNING id, status
+        """),
+        params,
+    )
+    r = row.mappings().first()
+    return dict(r) if r else None
+
+
+async def get_message(
+    session: AsyncSession, user_id: UUID, message_id: UUID
+) -> dict[str, Any] | None:
+    row = await session.execute(
+        text("""
+            SELECT id, conversation_id, seq, role, content, status, citations, degraded,
+                   token_usage, trace_id, superseded_by, created_at, updated_at
+            FROM messages WHERE id = :mid AND user_id = :uid
+        """),
+        {"mid": str(message_id), "uid": str(user_id)},
+    )
+    r = row.mappings().first()
+    return dict(r) if r else None
+
+
+async def get_user_message_before(
+    session: AsyncSession, user_id: UUID, conversation_id: UUID, seq: int
+) -> dict[str, Any] | None:
+    """重新生成用：取目标 assistant 消息之前的那条 user 消息。"""
+    row = await session.execute(
+        text("""
+            SELECT id, content FROM messages
+            WHERE conversation_id = :cid AND user_id = :uid AND seq < :seq AND role = 'user'
+            ORDER BY seq DESC LIMIT 1
+        """),
+        {"cid": str(conversation_id), "uid": str(user_id), "seq": seq},
+    )
+    r = row.mappings().first()
+    return dict(r) if r else None
+
+
+async def get_latest_assistant_interrupted(
+    session: AsyncSession, user_id: UUID, conversation_id: UUID
+) -> dict[str, Any] | None:
+    """审批 resume 定位：该会话最新的 interrupted/streaming assistant 消息。"""
+    row = await session.execute(
+        text("""
+            SELECT id, conversation_id, seq, status
+            FROM messages
+            WHERE conversation_id = :cid AND user_id = :uid
+              AND role = 'assistant' AND status IN ('interrupted', 'streaming')
+            ORDER BY seq DESC LIMIT 1
+        """),
+        {"cid": str(conversation_id), "uid": str(user_id)},
+    )
+    r = row.mappings().first()
+    return dict(r) if r else None
+
+
 async def list_messages(
     session: AsyncSession,
     user_id: UUID,

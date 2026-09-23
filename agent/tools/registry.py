@@ -27,7 +27,14 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from agent.tools.base import BaseTool, ToolCtx, ToolError, ToolMeta, ToolResult
+from agent.tools.base import (
+    ApprovalInterrupt,
+    BaseTool,
+    ToolCtx,
+    ToolError,
+    ToolMeta,
+    ToolResult,
+)
 from agent.tools.policy import PolicyDenied, get_policy_registry
 
 logger = logging.getLogger(__name__)
@@ -141,17 +148,50 @@ class ToolRegistry:
             model = meta.args_schema(**(args or {}))
 
             # 3) 参数级风险评估（deny / 升级到 L2）
+            llm_args = _model_args(model, meta)
             risk, notes = self._policies.evaluate_args(name, model)
             escalated = risk >= 2 and meta.risk_level < 2
             if risk >= 2:
-                raise ToolError(
-                    "APPROVAL_REQUIRED",
-                    f"工具 {name} 命中 L2 风险（{'；'.join(notes) or '策略等级'}），"
-                    "等待审批能力上线（M5）后执行",
-                )
+                # L2 = 不可逆/外发 → HITL（§7.3）。三条路：
+                #   a) ctx 带「已批准」approval_id（react 显式传入）→ 校验后放行；
+                #   b) 已有可复用审批（同 thread+工具+参数）：
+                #      approved → 直接执行；pending → 复用 id 再 interrupt；
+                #   c) 全新 → 落 approvals(pending) → ApprovalInterrupt。
+                # （b 的幂等复用是刚需：resume 会从头重跑节点，否则每次重跑
+                #   都新建一行孤儿 pending —— M5 验收实锤）
+                approved_id = ctx.extra.get("approved_approval_id")
+                if approved_id:
+                    await self._verify_approval(ctx, str(approved_id), name)
+                    ctx.extra["pending_exec_approval_id"] = str(approved_id)
+                else:
+                    reusable = await self._find_reusable_approval(ctx, name, llm_args)
+                    if reusable is not None and reusable["status"] == "approved":
+                        ctx.extra["pending_exec_approval_id"] = str(reusable["id"])
+                    else:
+                        is_new = reusable is None
+                        approval = reusable or await self._create_approval(
+                            ctx, name, llm_args, risk, notes
+                        )
+                        if is_new:
+                            await self._audit_l2_requested(ctx, name, risk, approval["id"])
+                            if ctx.emit:
+                                await ctx.emit(
+                                    "approval",
+                                    {
+                                        "approval_id": str(approval["id"]),
+                                        "tool": name,
+                                        "args": llm_args,
+                                        "risk_level": risk,
+                                        "reason": "；".join(notes) or "L2 风险等级",
+                                    },
+                                )
+                        raise ApprovalInterrupt(
+                            approval_id=str(approval["id"]), tool_name=name,
+                            tool_args=llm_args, risk_level=risk,
+                            reason="；".join(notes) or "L2 风险等级",
+                        )
 
             # 4) 幂等去重（工具层，§7.6；命中即返回上次结果，不再执行）
-            llm_args = _model_args(model, meta)
             dedupe_key = compute_dedupe_key(ctx.dedupe_seed, name, llm_args)
             cached = await self._dedupe_get(dedupe_key)
             if cached is not None:
@@ -180,6 +220,12 @@ class ToolRegistry:
                         "TOOL_TIMEOUT", f"工具 {name} 超时（>{meta.timeout_s}s）"
                     ) from None
 
+            # L2 已批准执行：回写 approvals.executed（E 系审批状态机闭环）
+            pending_exec = ctx.extra.get("pending_exec_approval_id")
+            if pending_exec:
+                ctx.extra.pop("pending_exec_approval_id", None)
+                await self._mark_executed(ctx, pending_exec, result)
+
             # 7) 结果截断（§7.8 第 1 层）
             result.risk_level = risk
             result.escalated = escalated
@@ -205,6 +251,12 @@ class ToolRegistry:
             raise
         except ToolError as exc:
             error_code = exc.code
+            raise
+        except ApprovalInterrupt:
+            # L2 审批信号必须原样上抛给 react 层（→ LangGraph interrupt 暂停图）。
+            # M5 验收实锤：不在此显式放行，它会被下面的 broad except 兜成
+            # TOOL_FAILED，审批永远到不了人工面板。
+            error_code = "APPROVAL_REQUIRED"
             raise
         except Exception as exc:  # noqa: BLE001 —— 工具内部异常统一转结构化错误
             logger.exception("tool %s 执行异常", name)
@@ -256,6 +308,91 @@ class ToolRegistry:
             await self._redis.set(f"tool_dedupe:{key}", result.model_dump_json(), ex=86400)
         except Exception:  # noqa: BLE001
             logger.warning("dedupe put 失败（忽略）", exc_info=True)
+
+    # ---------------- L2 审批（M5-2）----------------
+
+    async def _find_reusable_approval(
+        self, ctx: ToolCtx, name: str, args: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """查找可复用审批（同 thread+工具+参数，pending/approved 未过期）。"""
+        from apps.api.core.db import tenant_session
+        from apps.api.repositories import approvals as approvals_repo
+
+        try:
+            async with tenant_session(UUID(ctx.user_id)) as session:
+                return await approvals_repo.find_reusable(
+                    session, UUID(ctx.user_id),
+                    thread_id=ctx.conversation_id, tool_name=name, args=args,
+                )
+        except Exception:  # noqa: BLE001 —— 查询失败按「无复用」处理（走新建路径）
+            logger.warning("审批复用查询失败（降级为新建）", exc_info=True)
+            return None
+
+    async def _create_approval(
+        self, ctx: ToolCtx, name: str, args: dict[str, Any], risk: int, notes: list[str]
+    ) -> dict[str, Any]:
+        from apps.api.core.db import tenant_session
+        from apps.api.repositories import approvals as approvals_repo
+
+        async with tenant_session(UUID(ctx.user_id)) as session:
+            return await approvals_repo.create_approval(
+                session,
+                user_id=UUID(ctx.user_id),
+                thread_id=ctx.conversation_id,
+                tool_name=name,
+                args=args,
+                risk_level=risk,
+                reason="；".join(notes),
+            )
+
+    async def _verify_approval(self, ctx: ToolCtx, approval_id: str, name: str) -> dict:
+        """resume 路径校验：approval 必须 approved 且工具名一致（防伪造/换工具）。"""
+        from apps.api.core.db import tenant_session
+        from apps.api.repositories import approvals as approvals_repo
+
+        async with tenant_session(UUID(ctx.user_id)) as session:
+            approval = await approvals_repo.check_approved(
+                session, UUID(ctx.user_id), UUID(str(approval_id))
+            )
+        if approval is None:
+            raise ToolError("APPROVAL_INVALID", f"审批 {approval_id} 不存在或未批准")
+        if (approval.get("tool_call") or {}).get("tool") != name:
+            raise ToolError("APPROVAL_INVALID", "审批记录与工具不匹配")
+        return approval
+
+    async def _mark_executed(self, ctx: ToolCtx, approval_id: str, result: ToolResult) -> None:
+        from apps.api.core.db import tenant_session
+        from apps.api.repositories import approvals as approvals_repo
+
+        try:
+            async with tenant_session(UUID(ctx.user_id)) as session:
+                await approvals_repo.mark_executed(
+                    session, UUID(ctx.user_id), UUID(str(approval_id)),
+                    {"ok": result.ok, "content": result.content[:500],
+                     "error_code": result.error_code},
+                )
+        except Exception:  # noqa: BLE001 —— 标记失败不改变执行结果
+            logger.warning("approvals.executed 标记失败", exc_info=True)
+
+    async def _audit_l2_requested(
+        self, ctx: ToolCtx, name: str, risk: int, approval_id: Any
+    ) -> None:
+        try:
+            from apps.api.core.db import tenant_session
+
+            async with tenant_session(UUID(ctx.user_id)) as session:
+                await session.execute(
+                    text("""
+                        INSERT INTO audit_logs (user_id, actor_type, action, target, payload, trace_id)
+                        VALUES (:uid, 'user', 'tool.approval_requested', :target,
+                                CAST(:payload AS JSONB), :trace)
+                    """),
+                    {"uid": ctx.user_id, "target": name,
+                     "payload": json.dumps({"risk_level": risk, "approval_id": str(approval_id)}, ensure_ascii=False),
+                     "trace": ctx.trace_id},
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning("L2 请求审计失败 tool=%s", name, exc_info=True)
 
     def _store_full(self, ctx: ToolCtx, name: str, content: str) -> str:
         """超长全文落盘（§7.5 说对象存储/表；M4 用本地卷 + 引用 id，fetch_full 取回）。"""

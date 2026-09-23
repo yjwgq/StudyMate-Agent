@@ -42,6 +42,13 @@ async def chat_once(client, content, key):
         headers={"Content-Type": "application/json", "Idempotency-Key": key},
         json={"content": content},
     )
+    # M5：两步流（POST 投递 → GET 订阅）；幂等重放响应自身即 SSE。
+    # client 的默认 headers 已带 Authorization，订阅请求继承同一 client 即可。
+    if not r.headers.get("content-type", "").startswith("text/event-stream"):
+        r.raise_for_status()
+        mid = r.json()["data"]["message_id"]
+        req = client.build_request("GET", f"{BASE}/api/v1/chat/{mid}/stream")
+        r = await client.send(req, stream=True)
     buf = ""
     async for chunk in r.aiter_bytes():
         buf += chunk.decode("utf-8", errors="replace")

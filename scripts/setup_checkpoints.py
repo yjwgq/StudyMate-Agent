@@ -28,7 +28,30 @@ def main() -> None:
     # from_conn_string 返回上下文管理器；setup() 幂等
     with PostgresSaver.from_conn_string(dsn) as saver:
         saver.setup()
-    print("[checkpoints] checkpoints / checkpoint_writes / checkpoint_blobs ready")
+
+    # M5：把 checkpoint 表的读写权限授予应用角色。
+    # 为什么需要（F3 实锤）：应用以 app_worker（BYPASSRLS）连接，但该角色
+    # 在 schema public 上没有权限 → checkpointer 初始化失败 → 图退化为
+    # 无持久化运行，中断恢复（kill -9 后继续）静默失效。
+    # 建表在本脚本完成（app_owner），因此授权也放在这里（顺序天然正确）。
+    grants = [
+        "GRANT USAGE ON SCHEMA public TO app_api, app_worker",
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON checkpoints TO app_api, app_worker",
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON checkpoint_writes TO app_api, app_worker",
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON checkpoint_blobs TO app_api, app_worker",
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON checkpoint_migrations TO app_api, app_worker",
+        "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_api, app_worker",
+    ]
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        for stmt in grants:
+            try:
+                cur.execute(stmt)
+            except Exception as exc:  # noqa: BLE001 —— 表缺失等情况不阻断建表
+                print(f"[checkpoints] 授权跳过（{type(exc).__name__}: {exc}）：{stmt}")
+        conn.commit()
+    print("[checkpoints] checkpoints / checkpoint_writes / checkpoint_blobs ready（含授权）")
 
 
 if __name__ == "__main__":

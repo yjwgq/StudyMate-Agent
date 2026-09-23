@@ -98,6 +98,7 @@ async def registry(worker_engine):
         pool = McpClientPool([
             McpServerSpec("sandbox", "mcp_servers.sandbox_server", timeout_s=10.0),
             McpServerSpec("todo", "mcp_servers.todo_server", timeout_s=10.0),
+            McpServerSpec("email", "mcp_servers.email_server", timeout_s=10.0),
         ])
         for tool in await pool.discover():
             with contextlib.suppress(ValueError):

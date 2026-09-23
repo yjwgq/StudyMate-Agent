@@ -106,6 +106,27 @@ class ToolError(Exception):
         self.message = message
 
 
+class ApprovalInterrupt(Exception):
+    """L2 工具等待人工审批（M5-2）。
+
+    registry 落 approvals 行（pending）后抛出；react 层捕获并调
+    LangGraph interrupt() 暂停图（§7.3：risk=L2 → interrupt → approvals）。
+    审批决策经 Command(resume=...) 回流：approved → 重调 invoke（ctx 带
+    approved_approval_id）；rejected → 作为 Observation 回灌给模型。
+    """
+
+    def __init__(
+        self, *, approval_id: str, tool_name: str, tool_args: dict, risk_level: int, reason: str
+    ) -> None:
+        # 注意：不能用 self.args —— Exception.args 是内建元组属性
+        super().__init__(f"工具 {tool_name} 等待审批（{approval_id}）")
+        self.approval_id = approval_id
+        self.tool_name = tool_name
+        self.tool_args = tool_args
+        self.risk_level = risk_level
+        self.reason = reason
+
+
 class BaseTool(ABC):
     """执行体（ABC 强制实现）。元数据在 meta，横切关注点在 ToolRegistry。"""
 

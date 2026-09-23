@@ -171,6 +171,8 @@ NAME_MAP = {
     ("todo", "list_todos"): "todo_list",
     ("todo", "complete_todo"): "todo_complete",
     ("search", "web_search"): "search",
+    ("email", "send_email"): "send_email",
+    ("email", "list_outbox"): "list_outbox",
 }
 
 # 治理层注入参数（LLM schema 剔除；registry.invoke 时由 ToolCtx 填真值）
@@ -212,13 +214,24 @@ class McpClientPool:
 
 
 def _args_model_from(input_schema: dict[str, Any], *, name: str) -> type[ToolArgs]:
-    """从 MCP JSON schema 动态生成 pydantic 模型（基础类型映射；复杂类型按 str 兜底）。"""
+    """从 MCP JSON schema 动态生成 pydantic 模型。
+
+    支持基础类型 + 数组（`{"type": "array", "items": {...}}` → list[T]）——
+    M5 验收实锤：`send_email(to=[...])` 的数组参数被旧映射当成 str，
+    参数校验直接失败（模型根本调不动工具）。
+    """
     props = (input_schema or {}).get("properties", {}) or {}
     required = set((input_schema or {}).get("required", []) or [])
     type_map: dict[str, Any] = {"string": str, "integer": int, "number": float, "boolean": bool}
     field_defs: dict[str, Any] = {}
     for fname, spec in props.items():
-        py_type = type_map.get(str(spec.get("type", "string")), str)
+        raw_type = str(spec.get("type", "string"))
+        if raw_type == "array":
+            items = spec.get("items") or {}
+            item_type = type_map.get(str(items.get("type", "string")), str)
+            py_type: Any = list[item_type]  # type: ignore[valid-type]
+        else:
+            py_type = type_map.get(raw_type, str)
         desc = str(spec.get("description", ""))[:200]
         if fname in required:
             field_defs[fname] = (py_type, Field(..., description=desc))
