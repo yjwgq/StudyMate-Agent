@@ -41,6 +41,7 @@ dependencies = [
     "pymupdf>=1.24",
     "jieba>=0.42",
     "celery[redis]>=5.4",
+    "langfuse>=4.15.4",
 ]
 
 [dependency-groups]
@@ -50,6 +51,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",                  # FastAPI TestClient / 测试请求
+    "chromadb>=1.5.9",
 ]
 
 # 本项目不从源码构建成 wheel，直接以源码运行（uv run uvicorn apps.api.main:app）

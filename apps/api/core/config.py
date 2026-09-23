@@ -73,6 +73,25 @@ class Settings(BaseSettings):
     chunk_child_tokens: int = 256           # 子块：精准召回单元
     chunk_overlap_ratio: float = 0.1        # 子块重叠比例
 
+    # ---------------- 单路检索（M3，§8.2 / ADR-2）----------------
+    retrieval_top_k_children: int = 24      # 子块召回数（无精排，取父块去重后可能 < 上限）
+    retrieval_max_contexts: int = 6         # 注入提示词的父块上限（M6 精排后同为 top 6）
+    retrieval_parent_max_chars: int = 1600  # 单个父块注入上下文的字符上限
+    retrieval_snippet_max_chars: int = 200  # 引用脚注里展示的子块摘要长度
+
+    # ---------------- Groundedness（M3，§8.4）----------------
+    groundedness_enabled: bool = True
+    groundedness_threshold: float = 0.20    # 无出处事实句占比 > 20% → 重写一次
+
+    # ---------------- 可观测性（M3，§14.1 / §13.3）----------------
+    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    # §13.3：trace 通道最容易漏 —— SDK 默认全量上报 input/output，
+    # 脱敏必须默认开启，且有自动化断言（tests/unit/test_redact.py、验收 D4）
+    langfuse_redact_pii: bool = True
+    langfuse_sample_rate: float = 1.0       # 生产 100%（量小），压测时调低
+
     @property
     def upload_max_bytes(self) -> int:
         return self.upload_max_mb * 1024 * 1024
@@ -98,6 +117,11 @@ class Settings(BaseSettings):
     @property
     def jwt_configured(self) -> bool:
         return bool(self.jwt_secret)
+
+    @property
+    def langfuse_configured(self) -> bool:
+        """Langfuse Cloud 是否已配置。未配置时观测层自动 no-op，不阻塞业务。"""
+        return bool(self.langfuse_public_key and self.langfuse_secret_key)
 
 
 @lru_cache(maxsize=1)

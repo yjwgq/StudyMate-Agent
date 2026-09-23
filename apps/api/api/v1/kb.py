@@ -1,9 +1,11 @@
-"""知识库接口（M2-1/2，§8.1 + §13.7）。
+"""知识库接口（M2-1/2 + M3 检索调试台，§8.1 + §13.7 + §8.2）。
 
 POST /api/v1/kb/documents        上传（校验 → 去重 → 落库 processing → 投递 ingest）
 GET  /api/v1/kb/documents        列表
 GET  /api/v1/kb/documents/{id}   状态查询（C1 验收：processing → ready）
 POST /api/v1/kb/documents/{id}/reingest   手动重跑 ingest（C5 验收）
+POST /api/v1/kb/search           检索调试台（M3-8）：单路检索 → 命中+分数
+                                 （D5 验收也用它做租户隔离的自动化断言）
 
 设计要点：
     - 大小限制用流式累计，不信任 Content-Length（可伪造）；
@@ -23,7 +25,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
+from pydantic import BaseModel, Field
 
+from agent.retrieval.search import get_retriever
 from apps.api.core.config import settings
 from apps.api.core.db import tenant_session
 from apps.api.core.deps import UserCtx, current_user
@@ -200,3 +204,48 @@ async def reingest_document(
         await kb_repo.reset_document(session, document_id)
     _send_ingest_task(str(document_id))
     return {"data": {"ok": True, "document_id": str(document_id)}, "trace_id": trace_id}
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000, description="检索查询")
+    top_k: int = Field(default=6, ge=1, le=50, description="返回父块数上限")
+
+
+@router.post("/search")
+async def search_kb(
+    req: SearchRequest,
+    user: Annotated[UserCtx, Depends(current_user)],
+) -> dict:
+    """检索调试台（M3-8，§8.2）：单路向量检索，返回命中父块与分数。
+
+    与 chat 共用同一 Retriever —— 调试台看到的排序就是问答时注入的顺序。
+    检索失败返回 503 SEARCH_FAILED（embedding / DB 异常）。
+    """
+    retriever = get_retriever()
+    try:
+        qvec = await retriever.embed_query(req.query)
+        async with tenant_session(user.id) as session:
+            hits = await retriever.search(
+                session, user.id, req.query, qvec=qvec,
+                top_k=req.top_k * 3, max_contexts=req.top_k,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("kb/search 失败 uid=%s: %s", user.id, exc)
+        raise AppError(ErrorCode.SEARCH_FAILED, "检索服务暂不可用", 503) from exc
+    return {
+        "data": {
+            "query": req.query,
+            "hits": [
+                {
+                    "n": h.rank,
+                    "score": h.score,
+                    "document_id": str(h.document_id) if h.document_id else None,
+                    "title": h.document_title,
+                    "page": h.page,
+                    "snippet": h.child_content[:200],
+                    "parent_content": h.parent_content,
+                }
+                for h in hits
+            ],
+        }
+    }

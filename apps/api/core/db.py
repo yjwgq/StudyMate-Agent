@@ -12,9 +12,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from logging import getLogger
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -24,6 +26,8 @@ from sqlalchemy.ext.asyncio import (
 
 from apps.api.core.config import settings
 
+logger = getLogger(__name__)
+
 
 @lru_cache(maxsize=1)
 def get_engine() -> AsyncEngine:
@@ -32,13 +36,32 @@ def get_engine() -> AsyncEngine:
         raise RuntimeError(
             "DATABASE_URL 未配置：请在 .env 中填写数据库连接串（app_api 角色）"
         )
-    return create_async_engine(
+    engine = create_async_engine(
         settings.database_url,
         pool_size=5,
         max_overflow=5,
         pool_pre_ping=True,   # 连接池复用前探活，避免拿到被服务端断开的连接
         pool_recycle=1800,
     )
+    event.listens_for(engine.sync_engine, "connect")(_on_connect)
+    return engine
+
+
+def _on_connect(dbapi_conn: Any, _record: Any) -> None:
+    """每个新连接执行一次的连接级设置。
+
+    hnsw.iterative_scan（pgvector ≥ 0.8，M3/M6 依赖）：带 user_id 过滤时，
+    普通 HNSW「先取 top-k 再过滤」会丢结果，iterative_scan 在图遍历中补页。
+    会话级设置只影响 HNSW 过滤扫描；GUC 不存在（旧版 pgvector）时静默跳过，
+    检索退化为普通 HNSW 行为 —— 连接层 try/except 避免毒化事务。
+    """
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("SET hnsw.iterative_scan = 'iterative_scan'")
+    except Exception:  # noqa: BLE001 —— 旧版 pgvector 无该 GUC，降级可用
+        logger.warning("pgvector iterative_scan GUC 不可用，检索未启用补页扫描")
+    finally:
+        cur.close()
 
 
 @lru_cache(maxsize=1)

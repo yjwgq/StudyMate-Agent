@@ -96,9 +96,17 @@ async def finish(
     conversation_id: str = "",
     usage: dict[str, Any] | None = None,
     error: dict[str, Any] | None = None,
+    citations: list[dict[str, Any]] | None = None,
 ) -> None:
-    """写入终态（completed / failed / interrupted），TTL 从写入起重新计 24h。"""
+    """写入终态（completed / failed / interrupted），TTL 从写入起重新计 24h。
+
+    citations 一并缓存：重放时若不带脚注，用户重试同一请求会看到"答案有 [1]
+    但来源面板消失"（M3 验收实锤）。degraded 不需要缓存 —— 重放不再跑校验，
+    其语义是"本次生成过程"的标记。
+    """
     payload: dict[str, Any] = {"status": status, "content": content, "conversation_id": conversation_id, "usage": usage}
+    if citations:
+        payload["citations"] = citations
     if error:
         payload["error"] = error
     await redis.set(

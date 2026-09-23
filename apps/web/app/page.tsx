@@ -1,27 +1,38 @@
 'use client';
 
 /**
- * M1 聊天页 —— 在 M0 端到端闭环之上接入认证与会话语义：
- *   - 未登录 → 跳转 /login；401 → apiFetch 内部刷新重试，刷新失败跳登录；
- *   - 请求带 Idempotency-Key（每次用户输入生成 UUID，§7.6）；
- *   - 首条消息不带 conversation_id → 服务端建会话；
- *     done 事件返回 conversation_id 后，本页后续消息都挂在同一会话上；
- *   - 409（会话锁 / 幂等进行中）展示可读提示（B6 的前端表现）。
+ * 聊天页 —— M3 版本（单路 RAG + 引用脚注）。
+ *
+ * 在 M1（认证/会话锁/幂等）之上新增：
+ *   - citations 事件：正文开始前的来源面板，脚注 [n] 可点击定位来源文档与段落（D2）；
+ *   - notice 事件（clear=true）：groundedness 校验触发重写时清空当前气泡重新累积；
+ *   - degraded 事件：显式降级角标（§8.3「降级必须可见」）。
  *
  * 仍然手写 SSE 解析：出问题时能直接定位是哪一层没吐数据。
  */
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiFetch, readableError } from '../lib/api';
 import { clearTokens, getEmail, isLoggedIn } from '../lib/auth';
 
 type Role = 'user' | 'assistant' | 'error';
 
+interface Citation {
+  n: number;
+  title: string;
+  page: number | null;
+  snippet: string;
+  score: number;
+}
+
 interface Message {
   id: string;
   role: Role;
   content: string;
+  citations?: Citation[];
+  degraded?: string[];
 }
 
 interface SseEvent {
@@ -102,6 +113,38 @@ export default function ChatPage() {
     });
   }
 
+  function attachCitations(citations: Citation[]) {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant') return prev;
+      const next = [...prev];
+      next[next.length - 1] = { ...last, citations };
+      return next;
+    });
+  }
+
+  function markDegraded(flags: string[], message: string) {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      const next = [...prev];
+      if (last && last.role === 'assistant') {
+        next[next.length - 1] = { ...last, degraded: flags };
+      }
+      return [...next, { id: nextId(), role: 'error', content: `[降级] ${message}` }];
+    });
+  }
+
+  /** notice(clear=true)：groundedness 触发重写 —— 清空当前气泡重新累积。 */
+  function clearCurrentAssistant() {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last || last.role !== 'assistant') return prev;
+      const next = [...prev];
+      next[next.length - 1] = { ...last, content: '', degraded: undefined };
+      return next;
+    });
+  }
+
   function pushError(text: string) {
     setMessages((prev) => {
       // 出错时，末尾通常留着一个还没吐字的 assistant 占位气泡，先摘掉
@@ -117,6 +160,21 @@ export default function ChatPage() {
       case 'token': {
         const delta = typeof data.delta === 'string' ? data.delta : '';
         if (delta) appendToken(delta);
+        break;
+      }
+      case 'citations': {
+        const list = Array.isArray(data.citations) ? (data.citations as Citation[]) : [];
+        if (list.length > 0) attachCitations(list);
+        break;
+      }
+      case 'notice': {
+        // 重写通知：清空当前气泡（保留 citations，来源不变）
+        if (data.clear === true) clearCurrentAssistant();
+        break;
+      }
+      case 'degraded': {
+        const flags = Array.isArray(data.degraded) ? (data.degraded as string[]) : [];
+        markDegraded(flags, String(data.message ?? '本轮结果有降级'));
         break;
       }
       case 'error': {
@@ -223,10 +281,11 @@ export default function ChatPage() {
         <div className="header-row">
           <div>
             <h1>Personal Agent OS</h1>
-            <p>M1 · 多租户认证版（JWT / RLS / 会话锁 / 幂等）</p>
+            <p>M3 · 单路 RAG（pgvector 检索 + 引用脚注 + groundedness 校验）</p>
           </div>
           <div className="header-user">
             <span>{email ?? '已登录'}</span>
+            <Link className="linklike" href="/kb">知识库</Link>
             <button className="linklike" onClick={logout}>退出</button>
           </div>
         </div>
@@ -235,17 +294,43 @@ export default function ChatPage() {
       <div className="stream" ref={streamRef}>
         {messages.length === 0 ? (
           <div className="empty">
-            输入一句话试试。
+            输入一句话试试 —— 上传文档后提问，答案会带 <b>[1]</b> 来源脚注。
             <br />
             文字应当是<b>逐个出现</b>的 —— 若一次性全出现，说明流被中间层缓冲了。
           </div>
         ) : (
           messages.map((m, i) => {
             const streaming = busy && i === messages.length - 1 && m.role === 'assistant';
+            const hasCitations = m.role === 'assistant' && (m.citations?.length ?? 0) > 0;
+            const hasDegraded = m.role === 'assistant' && (m.degraded?.length ?? 0) > 0;
             return (
-              <div key={m.id} className={`bubble ${m.role}`}>
-                {m.content}
-                {streaming && <span className="caret">▍</span>}
+              <div key={m.id} className={`bubble-wrap ${m.role}`}>
+                <div className={`bubble ${m.role}`}>
+                  {m.content}
+                  {streaming && <span className="caret">▍</span>}
+                </div>
+                {hasCitations && (
+                  <div className="citations">
+                    {m.citations!.map((c) => (
+                      <details className="citation" key={c.n}>
+                        <summary>
+                          <span className="citation-n">[{c.n}]</span>
+                          <span className="citation-title">{c.title}</span>
+                          {c.page !== null && <span className="citation-page">第 {c.page} 段</span>}
+                          <span className="citation-score" title="cosine 相似度">
+                            {c.score.toFixed(3)}
+                          </span>
+                        </summary>
+                        <div className="citation-body">{c.snippet}</div>
+                      </details>
+                    ))}
+                  </div>
+                )}
+                {hasDegraded && (
+                  <div className="degraded-badge" title={m.degraded!.join(', ')}>
+                    ⚠ 部分结论缺少资料支撑（降级：{m.degraded!.join('、')}）
+                  </div>
+                )}
               </div>
             );
           })

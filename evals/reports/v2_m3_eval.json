@@ -1,0 +1,23 @@
+{
+  "summary": {
+    "n": {
+      "count": 50
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 1.0
+    },
+    "ndcg@10": {
+      "mean": 0.9978
+    },
+    "latency_p50_ms": {
+      "ms": 160
+    },
+    "latency_p95_ms": {
+      "ms": 228
+    }
+  },
+  "misses": []
+}

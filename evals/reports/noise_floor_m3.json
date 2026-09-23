@@ -1,0 +1,33 @@
+{
+  "milestone": "M3",
+  "metric_layer": "retrieval",
+  "runs": 5,
+  "k": 10,
+  "per_metric": {
+    "recall@10": {
+      "mean": 1.0,
+      "std": 0.0,
+      "min": 1.0,
+      "max": 1.0,
+      "gate_2sigma": 0.0,
+      "runs": 5
+    },
+    "mrr@10": {
+      "mean": 1.0,
+      "std": 0.0,
+      "min": 1.0,
+      "max": 1.0,
+      "gate_2sigma": 0.0,
+      "runs": 5
+    },
+    "ndcg@10": {
+      "mean": 0.9978,
+      "std": 0.0,
+      "min": 0.9978,
+      "max": 0.9978,
+      "gate_2sigma": 0.0,
+      "runs": 5
+    }
+  },
+  "note": "M3 检索层为确定性计算；若 σ=0，说明检索指标可做精确阈值门禁。答案层指标（RAGAS）的噪声地板必须在 M7 重做（§14.2.3）。"
+}

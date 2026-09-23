@@ -102,14 +102,18 @@ async def insert_message(
     token_usage: dict[str, Any] | None = None,
     trace_id: str | None = None,
     error: dict[str, Any] | None = None,
+    citations: list[dict[str, Any]] | None = None,
+    degraded: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     row = await session.execute(
         text("""
             INSERT INTO messages
-              (conversation_id, user_id, seq, role, content, status, token_usage, trace_id, error)
+              (conversation_id, user_id, seq, role, content, status, token_usage,
+               trace_id, error, citations, degraded)
             VALUES
               (:cid, :uid, :seq, :role, :content, :status,
-               CAST(:usage AS JSONB), :trace, CAST(:err AS JSONB))
+               CAST(:usage AS JSONB), :trace, CAST(:err AS JSONB),
+               CAST(:citations AS JSONB), CAST(:degraded AS JSONB))
             RETURNING id, seq, created_at
         """),
         {
@@ -122,6 +126,8 @@ async def insert_message(
             "usage": None if token_usage is None else json.dumps(token_usage),
             "trace": trace_id,
             "err": None if error is None else json.dumps(error, ensure_ascii=False),
+            "citations": None if citations is None else json.dumps(citations, ensure_ascii=False),
+            "degraded": None if degraded is None else json.dumps(degraded, ensure_ascii=False),
         },
     )
     return dict(row.mappings().one())

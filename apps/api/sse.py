@@ -19,6 +19,10 @@ from typing import Any
 EVENT_TOKEN = "token"
 EVENT_DONE = "done"
 EVENT_ERROR = "error"
+# M3（§11.3 完整协议的逐步落地）：
+EVENT_CITATIONS = "citations"   # 检索命中：{citations: [{n,title,page,snippet,...}]}
+EVENT_NOTICE = "notice"         # 过程提示：{code, message, clear?}（clear=true 时前端清空当前气泡重生成）
+EVENT_DEGRADED = "degraded"     # 显式降级标记（§8.3）：{degraded: [...], message}
 
 SSE_HEADERS: dict[str, str] = {
     "Cache-Control": "no-cache, no-transform",

@@ -11,18 +11,20 @@
 | M0 | 端到端最小闭环（浏览器 → FastAPI → LLM → SSE 逐字回流） | ✅ 完成（2026-09-22 验收通过） |
 | M1 | 基础设施与多租户认证（compose 全量编排 / 16 张表迁移 / JWT+RLS / 会话锁 / 幂等） | ✅ 完成（2026-09-23 验收 B1–B8 通过） |
 | M2 | 知识库入库管线（上传校验 / PyMuPDF 解析 / 父子分块 / 千问向量化 / Celery ingest） | ✅ 完成（2026-09-23 验收 C1–C7 通过） |
-| M3 | 单路 RAG + 可观测 + 评测基建 | ⏭️ 下一个 |
-| M4 – M10 | 见施工计划 | ⏳ 未开始 |
+| M3 | 单路 RAG + 可观测 + 评测基建（pgvector 检索带引用 / Langfuse trace + PII 脱敏 / golden 50 条 + 噪声地板） | ✅ 完成（2026-09-23 验收 D1–D7 通过） |
+| M4 | Agent 运行时（AgentState / planner DAG / ReAct 工具循环） | ⏭️ 下一个 |
+| M5 – M10 | 见施工计划 | ⏳ 未开始 |
 
 ## 文档
 
 | 文档 | 用途 |
 |------|------|
 | [`项目实施计划.md`](./项目实施计划.md) | **施工依据**：里程碑、任务分解、验收标准、进度追踪 |
+| [`M1_验收手册.md`](./M1_验收手册.md) / [`M2_验收手册.md`](./M2_验收手册.md) / [`M3_验收手册.md`](./M3_验收手册.md) | 各里程碑验收记录（含实测发现与修复） |
 | [`docs/design/PersonalAgent_设计文档_v1.1.md`](./docs/design/PersonalAgent_设计文档_v1.1.md) | 设计依据：架构、ADR、DDL、协议 |
 | [`docs/design/PersonalAgent_设计文档_评审报告.md`](./docs/design/PersonalAgent_设计文档_评审报告.md) | 设计评审：45 条问题与改进方案 |
 
-## 快速开始（M1）
+## 快速开始（M3）
 
 ### 1. 准备环境变量
 
@@ -48,7 +50,9 @@ docker compose -f infra/docker-compose.dev.yml up -d --build
 
 | 地址 | 用途 |
 |------|------|
-| http://localhost:8080 | 应用（未登录会跳转 /login） |
+| http://localhost:8080 | 对话（RAG 问答，答案带 `[1]` 引用脚注；未登录跳 /login） |
+| http://localhost:8080/kb | 知识库：文档列表 / 上传 / 入库进度 |
+| http://localhost:8080/kb/debug | 检索调试台：命中分数 + 注入的父块全文 |
 | http://localhost:8080/api/v1/health | 存活检查 |
 | http://localhost:8080/api/v1/ready | 就绪检查（LLM / JWT / DB / Redis） |
 | http://localhost:8080/api/v1/config | 查看当前配置（不回显密钥） |
@@ -59,6 +63,13 @@ docker compose -f infra/docker-compose.dev.yml up -d --build
 uv sync
 uv run pytest tests/unit -v          # 单元测试（无需数据库）
 uv run pytest tests/security -v      # 安全集成测试（需要开发栈已启动）
+
+# M3 端到端验收（D1–D5，需栈运行 + 语料已入库）
+uv run python scripts/m3_acceptance.py
+
+# 检索层评测与噪声地板（D6/D7）
+uv run python -m evals.run_eval --base-url http://127.0.0.1:8080 --k 10
+uv run python -m evals.noise_floor --runs 5 --base-url http://127.0.0.1:8080
 ```
 
 ### 5. 仅启动后端（调试用）
@@ -77,7 +88,7 @@ apps/api/      FastAPI 接入层（core / api.v1 / repositories）
 apps/web/      Next.js 前端（聊天 / 登录 / 注册）
 agent/         Agent 运行时（图编排、工具、记忆、检索、护栏）
 mcp_servers/   自建 MCP 工具服务
-worker/        Celery 异步任务
+worker/        Celery 异步任务（ingest 队列）
 infra/         容器编排、镜像、迁移（alembic）、数据库初始化
 evals/         评测集与评测脚本
 scripts/       一次性脚本（checkpoint 建表等）
