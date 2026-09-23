@@ -111,6 +111,9 @@ services:
     environment:
       # 容器内直连不需要走代理
       NO_PROXY: localhost,127.0.0.1,api,web,postgres,redis
+      UPLOAD_DIR: /data/uploads        # 与 worker 共享的文件卷
+    volumes:
+      - uploads:/data/uploads
     expose:
       - "8000"
     depends_on:
@@ -146,6 +149,31 @@ services:
       - "3000"
     restart: unless-stopped
 
+  # ------------------------------------------------------------
+  #  Celery worker（M2：ingest 队列，§8.1）
+  #  与 api 共用镜像；ingest 是重活，独立队列独立进程，
+  #  大文件解析/向量化不会阻塞 API 请求（M2-8）
+  # ------------------------------------------------------------
+  worker:
+    image: personal-agent-os-dev-api
+    command: uv run --no-dev celery -A worker.celery_app worker -Q ingest -l info --concurrency=2
+    env_file:
+      - ../.env
+    environment:
+      NO_PROXY: localhost,127.0.0.1,api,web,postgres,redis
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
+  uploads:

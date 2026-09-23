@@ -38,6 +38,9 @@ dependencies = [
     "bcrypt>=4.1",
     # --- LangGraph checkpoint（M1 只用其建表迁移；运行时 M4 接入）---
     "langgraph-checkpoint-postgres>=2.0",
+    "pymupdf>=1.24",
+    "jieba>=0.42",
+    "celery[redis]>=5.4",
 ]
 
 [dependency-groups]

@@ -53,6 +53,34 @@ class Settings(BaseSettings):
     idempotency_ttl_s: int = 86400          # Idempotency-Key 结果缓存 24h
     conversation_lock_ttl_ms: int = 300_000  # 会话锁 TTL 5 分钟（长任务由持有者续期，M5 实现）
 
+    # ---------------- 知识库上传（M2，§13.7）----------------
+    upload_dir: str = "data/uploads"        # 容器内由 compose 覆盖为 /data/uploads
+    upload_max_mb: int = 50                 # 单文件大小上限（C6）
+    doc_quota_per_user: int = 200           # 每用户文档数配额（§13.7）
+    parse_max_pages: int = 2000             # 解析页数上限（防巨型文档 DoS）
+    parse_max_unzip_mb: int = 500           # DOCX 解压后总量上限（防 zip bomb，§13.7）
+
+    # ---------------- Embedding（M2，ADR-8 全程云端）----------------
+    embed_base_url: str = ""
+    embed_api_key: str = ""
+    embed_model: str = ""
+    embed_dim: int = 1024                   # 必须与 DDL 的 vector(1024) 一致
+    embed_batch_size: int = 10              # DashScope 兼容模式单请求上限
+    embed_max_retries: int = 3              # 429/5xx 指数退避次数
+
+    # ---------------- 父子分块（M2，§6.5）----------------
+    chunk_parent_tokens: int = 1024         # 父块：喂模型的上下文单元
+    chunk_child_tokens: int = 256           # 子块：精准召回单元
+    chunk_overlap_ratio: float = 0.1        # 子块重叠比例
+
+    @property
+    def upload_max_bytes(self) -> int:
+        return self.upload_max_mb * 1024 * 1024
+
+    @property
+    def embed_configured(self) -> bool:
+        return bool(self.embed_base_url and self.embed_api_key and self.embed_model)
+
     @property
     def cors_origin_list(self) -> list[str]:
         """把逗号分隔的来源串拆成列表。"""

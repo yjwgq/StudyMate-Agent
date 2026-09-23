@@ -11,6 +11,7 @@
 """
 
 import uuid
+from collections.abc import Awaitable
 
 from redis.asyncio import Redis
 
@@ -43,4 +44,6 @@ async def acquire_conversation_lock(redis: Redis, conversation_id: str) -> str |
 
 async def release_conversation_lock(redis: Redis, conversation_id: str, token: str) -> None:
     """释放自己持有的锁（非阻塞；lua 保证「比对 + 删除」原子性）。"""
-    await redis.eval(_RELEASE_LUA, 1, _key(conversation_id), token)
+    result = redis.eval(_RELEASE_LUA, 1, _key(conversation_id), token)
+    if isinstance(result, Awaitable):
+        await result

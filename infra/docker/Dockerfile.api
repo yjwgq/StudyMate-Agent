@@ -30,6 +30,8 @@ RUN uv sync --no-dev
 COPY apps/__init__.py ./apps/__init__.py
 COPY apps/api/ ./apps/api/
 COPY agent/ ./agent/
+# M2：Celery ingest worker 与 api 共用本镜像
+COPY worker/ ./worker/
 
 # M1：迁移脚本与一次性脚本（migrate 容器需要 alembic.ini + infra/alembic + scripts）
 COPY alembic.ini ./

@@ -13,7 +13,7 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.api.api.v1 import auth, chat, conversations, meta
+from apps.api.api.v1 import auth, chat, conversations, kb, meta
 from apps.api.core.config import settings
 from apps.api.core.errors import new_trace_id, register_exception_handlers
 
@@ -62,3 +62,4 @@ app.include_router(meta.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(conversations.router, prefix="/api/v1")
+app.include_router(kb.router, prefix="/api/v1")
