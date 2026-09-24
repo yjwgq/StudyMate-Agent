@@ -1,0 +1,44 @@
+# ============================================================
+#  Docker 构建上下文排除
+#  目的：让镜像只包含运行必需的代码，减小体积并避免泄密
+# ============================================================
+
+# ---- 绝不进镜像 ----
+.env
+.env.*
+!.env.example
+
+# ---- 虚拟环境与缓存（镜像内会重新装）----
+.venv/
+.uv_cache/
+node_modules/
+.next/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 版本控制与 CI ----
+.git/
+.gitignore
+.github/
+
+# ---- 文档与评测（运行时不依赖）----
+docs/
+evals/
+tests/
+*.md
+!README.md
+
+# ---- 运行时数据 ----
+data/
+logs/
+*.log
+uploads/
+
+# ---- IDE 与系统 ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

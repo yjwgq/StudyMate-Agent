@@ -1,0 +1,96 @@
+# ============================================================
+#  CI —— M7-4（设计文档 §15.2 / 实施计划 M7-4）
+#
+#  范围刻意精简：只跑**不依赖本地栈**的检查。
+#    · 安全集成用例（tests/security）与 Agent 全图用例（tests/integration）
+#      需要 PostgreSQL + Redis，本地人工跑（README「跑测试」章节）；
+#    · 评测冒烟（60 条子集，阈值 = 噪声地板 2σ）需要真实语料与模型额度，
+#      同样本地人工跑 —— 放进 CI 会既慢又烧钱，且失败原因难以定位。
+#
+#  三道门禁：后端（ruff + mypy + 单测）、前端（tsc + build）、以及
+#  「迁移可加载」检查（Alembic 脚本能被解析，防迁移写坏到部署才发现）。
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# 同一分支的新推送取消旧运行（省额度、结果只关心最新一次）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端 · ruff + mypy + 单测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 安装依赖（含 dev）
+        run: uv sync --frozen
+
+      - name: ruff（lint）
+        run: uv run ruff check .
+
+      - name: mypy（类型）
+        run: uv run mypy agent apps evals worker scripts
+
+      - name: pytest（单元测试，无外部依赖）
+        run: uv run pytest tests/unit -q
+
+  web:
+    name: 前端 · 类型检查 + 构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: TypeScript 类型检查
+        run: npx tsc --noEmit
+
+      - name: Next.js 构建
+        run: npm run build
+        env:
+          # 构建期不需要真实后端；避免 next 因缺变量告警
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  migrations:
+    name: 迁移 · Alembic 可加载性
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 安装依赖（含 dev）
+        run: uv sync --frozen
+
+      - name: 迁移历史可解析（不连库）
+        run: uv run alembic history > /dev/null
+
+      - name: 迁移脚本可导入（语法/引用错误立即暴露）
+        run: uv run python -c "import pathlib; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in pathlib.Path('infra/alembic/versions').glob('*.py')]; print('ok')"

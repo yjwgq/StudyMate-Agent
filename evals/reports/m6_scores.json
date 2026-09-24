@@ -1,0 +1,138 @@
+{
+  "baseline_single_path": {
+    "n": {
+      "count": 50
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 1.0
+    },
+    "ndcg@10": {
+      "mean": 0.9978
+    },
+    "latency_p50_ms": {
+      "ms": 164
+    },
+    "latency_p95_ms": {
+      "ms": 202
+    }
+  },
+  "hybrid_rrf": {
+    "n": {
+      "count": 50
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 1.0
+    },
+    "ndcg@10": {
+      "mean": 0.9978
+    },
+    "latency_p50_ms": {
+      "ms": 170
+    },
+    "latency_p95_ms": {
+      "ms": 194
+    }
+  },
+  "hybrid_rerank": {
+    "n": {
+      "count": 50
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 1.0
+    },
+    "ndcg@10": {
+      "mean": 0.9978
+    },
+    "latency_p50_ms": {
+      "ms": 255
+    },
+    "latency_p95_ms": {
+      "ms": 345
+    }
+  },
+  "vector_down_single": {
+    "n": {
+      "count": 50
+    },
+    "recall@10": {
+      "mean": 0.0
+    },
+    "mrr@10": {
+      "mean": 0.0
+    },
+    "ndcg@10": {
+      "mean": 0.0
+    },
+    "latency_p50_ms": {
+      "ms": 151
+    },
+    "latency_p95_ms": {
+      "ms": 180
+    }
+  },
+  "vector_down_hybrid": {
+    "n": {
+      "count": 50
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 1.0
+    },
+    "ndcg@10": {
+      "mean": 0.9978
+    },
+    "latency_p50_ms": {
+      "ms": 246
+    },
+    "latency_p95_ms": {
+      "ms": 349
+    }
+  },
+  "attribution": {
+    "hybrid_contribution": {
+      "recall@10": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@10": 0.0
+    },
+    "rerank_contribution": {
+      "recall@10": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@10": 0.0
+    },
+    "vector_down_availability": {
+      "single_path_recall": 0.0,
+      "hybrid_recall": 1.0,
+      "delta": 1.0
+    }
+  },
+  "observations": {
+    "top1_changed_by_hybrid": {
+      "count": 0,
+      "ids": []
+    },
+    "top1_changed_by_rerank": {
+      "count": 0,
+      "ids": []
+    },
+    "keyword_path_used": {
+      "count": 50
+    },
+    "both_paths_hit": {
+      "count": 50
+    },
+    "degraded_in_main_pipeline": {
+      "count": 50
+    }
+  }
+}

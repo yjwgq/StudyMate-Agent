@@ -1,0 +1,179 @@
+# ============================================================
+#  Personal Agent OS — 开发编排（M1：基础设施 + 多租户认证）
+# ============================================================
+#  用法：
+#      docker compose -f infra/docker-compose.dev.yml up -d --build
+#      浏览器打开 http://localhost:8080
+#
+#  服务（随里程碑递增）：
+#      M0 → caddy · api · web
+#      M1 → + postgres · redis · migrate        ← 本里程碑
+#      M9 → + worker · beat
+#
+#  三个约定：
+#      1. 构建上下文是【项目根目录】，build.context 写 ..
+#      2. 环境变量从项目根的 .env 读取（env_file: ../.env）
+#      3. 迁移由独立的 migrate 容器执行一次，api 等它成功后才启动
+#         （depends_on: service_completed_successfully，见设计文档 §15.1；
+#          绝不让多个容器启动时各自 alembic upgrade——并发迁移会冲突）
+# ============================================================
+
+name: personal-agent-os-dev
+
+services:
+  # ------------------------------------------------------------
+  #  反向代理：统一入口（浏览器只访问 8080）
+  # ------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  PostgreSQL 16 + pgvector（业务数据 + 向量 + LangGraph checkpoint）
+  #  必须用 pgvector 镜像：迁移里有 CREATE EXTENSION vector 与 hnsw 索引，
+  #  普通 postgres:16 会在扩展处失败（M1-3 特别要求）。
+  #  首次初始化时 infra/postgres/init/01-roles.sh 创建三角色（ADR-9）。
+  # ------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    env_file:
+      - ../.env
+    environment:
+      POSTGRES_DB: agent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    # 回环高位端口：宿主机跑 pytest / psql 调试用，不对外网暴露
+    ports:
+      - "127.0.0.1:15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agent -h 127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  Redis 7（会话锁 / 幂等 / 后续限流与缓存 + M9 Celery broker）
+  # ------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  迁移任务（一次性）：alembic upgrade head + checkpoint 三表
+  #  与 api 共用同一镜像（image 指向 api 的镜像名），成功即退出。
+  #  B2 验收：重复执行幂等。手动重跑：
+  #      docker compose -f infra/docker-compose.dev.yml run --rm migrate
+  # ------------------------------------------------------------
+  migrate:
+    image: personal-agent-os-dev-api
+    command: >
+      sh -c "uv run --no-dev alembic upgrade head &&
+             uv run --no-dev python scripts/setup_checkpoints.py"
+    env_file:
+      - ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------------------
+  #  后端（FastAPI）
+  # ------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.api
+    image: personal-agent-os-dev-api
+    env_file:
+      - ../.env
+    environment:
+      # 容器内直连不需要走代理
+      NO_PROXY: localhost,127.0.0.1,api,web,postgres,redis
+      UPLOAD_DIR: /data/uploads        # 与 worker 共享的文件卷
+    volumes:
+      - uploads:/data/uploads
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # 用容器自带的 python 探测，避免为 M0 额外引入 curl
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status==200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  前端（Next.js 15）
+  # ------------------------------------------------------------
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.web
+    environment:
+      NODE_ENV: production
+    expose:
+      - "3000"
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  #  Celery worker（M2：ingest 队列，§8.1）
+  #  与 api 共用镜像；ingest 是重活，独立队列独立进程，
+  #  大文件解析/向量化不会阻塞 API 请求（M2-8）
+  # ------------------------------------------------------------
+  worker:
+    image: personal-agent-os-dev-api
+    command: uv run --no-dev celery -A worker.celery_app worker -Q ingest -l info --concurrency=2
+    env_file:
+      - ../.env
+    environment:
+      NO_PROXY: localhost,127.0.0.1,api,web,postgres,redis
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

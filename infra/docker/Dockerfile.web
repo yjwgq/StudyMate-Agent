@@ -1,0 +1,51 @@
+# ============================================================
+#  Web 镜像 —— Next.js 15（多阶段构建）
+# ============================================================
+#  构建上下文 = 项目根目录
+#      docker build -f infra/docker/Dockerfile.web .
+#
+#  依赖 next.config.mjs 中的 output: 'standalone'，
+#  它会让 next build 产出 .next/standalone（含最小化 node_modules），
+#  运行层因此不必拷贝完整的 node_modules。
+# ============================================================
+
+# ---------- 依赖层 ----------
+FROM node:20-alpine AS deps
+WORKDIR /app
+# 修复 2026-09-22：容器不继承宿主机 npm 配置，默认走 registry.npmjs.org，
+# 国内直连必超时（ETIMEDOUT）——必须显式指定镜像源。
+# package-lock.json 已生成（宿主机 npm install 产物，resolved 均指向 npmmirror），
+# 换用 npm ci：可复现构建 + 更快重装。
+# 注意：后续改动 package.json 后，需在宿主机重新 npm install 刷新 lock 文件，
+# 否则 npm ci 会因两者不同步而直接失败（这是刻意的，防止镜像内静默漂移）。
+COPY apps/web/package.json apps/web/package-lock.json ./
+RUN npm ci --registry=https://registry.npmmirror.com
+
+# ---------- 构建层 ----------
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/web/ ./
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ---------- 运行层 ----------
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# 非 root 运行
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 3000
+
+CMD ["node", "server.js"]
