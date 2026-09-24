@@ -1,12 +1,15 @@
 'use client';
 
 /**
- * 检索调试台（M3-8，§8.2）。
+ * 检索调试台（M3-8 → M6 升级为逐路对比视图）。
  *
  * 与 chat 共用同一 Retriever：这里看到的排序就是问答时注入上下文的顺序。
  * 用途：
  *   1. 调参/排查检索质量问题（分数、命中父块、来源文档）；
- *   2. M6 加混合检索 + RRF + Rerank 后，本页是逐路对比的观察窗。
+ *   2. **逐路对比**（M6）：每命中显示向量分 / 关键词分 / RRF 分 / 精排分与
+ *      命中的路数 —— 判断「混合检索贡献了什么、精排改变了什么排序」；
+ *   3. **降级观察**：页面顶部展示本次生效的 flag 与降级标记，配合
+ *      /meta/flags 开关即可现场演示「一路挂了还能用」（G2/G3）。
  */
 
 import { useEffect, useState } from 'react';
@@ -18,12 +21,36 @@ import { getEmail, isLoggedIn } from '../../../lib/auth';
 interface Hit {
   n: number;
   score: number;
+  rerank_score: number | null;
+  vector_score: number | null;
+  keyword_score: number | null;
+  rrf_score: number | null;
+  sources: string[];
   document_id: string | null;
   title: string;
   page: number | null;
   snippet: string;
   parent_content: string;
 }
+
+interface Diagnostics {
+  flags?: Record<string, boolean>;
+  vector_count?: number;
+  keyword_count?: number;
+  fused_count?: number;
+  vector_ms?: number | null;
+  keyword_ms?: number | null;
+  rerank_ms?: number | null;
+}
+
+const DEGRADED_TEXT: Record<string, string> = {
+  rerank: '未精排（精排不可用，已用 RRF 顺序）',
+  vector: '未走向量检索（仅关键词路）',
+  keyword: '未走关键词检索（仅向量路）',
+  retrieval: '本轮未使用知识库',
+};
+
+const fmt = (v: number | null | undefined, digits = 4) => (v == null ? '—' : v.toFixed(digits));
 
 export default function KbDebugPage() {
   const router = useRouter();
@@ -32,6 +59,8 @@ export default function KbDebugPage() {
   const [query, setQuery] = useState('');
   const [topK, setTopK] = useState(6);
   const [hits, setHits] = useState<Hit[] | null>(null);
+  const [degraded, setDegraded] = useState<string[]>([]);
+  const [diag, setDiag] = useState<Diagnostics | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -52,6 +81,8 @@ export default function KbDebugPage() {
     setBusy(true);
     setMsg(null);
     setHits(null);
+    setDegraded([]);
+    setDiag(null);
     setExpanded(null);
     const t0 = performance.now();
     try {
@@ -66,6 +97,8 @@ export default function KbDebugPage() {
       }
       const body = await res.json();
       setHits(body?.data?.hits ?? []);
+      setDegraded(body?.data?.degraded ?? []);
+      setDiag(body?.data?.diagnostics ?? null);
       setElapsed(performance.now() - t0);
     } catch (err) {
       setMsg(`检索失败：${(err as Error).message}`);
@@ -76,7 +109,11 @@ export default function KbDebugPage() {
 
   if (!ready) return null;
 
-  const maxScore = hits && hits.length > 0 ? Math.max(...hits.map((h) => h.score)) : 0;
+  // 进度条基准用「展示分」（精排分优先）—— 否则精排分与向量分混在一张图上会失真
+  const maxScore =
+    hits && hits.length > 0
+      ? Math.max(...hits.map((h) => h.rerank_score ?? h.score))
+      : 0;
 
   return (
     <div className="layout wide">
@@ -124,6 +161,36 @@ export default function KbDebugPage() {
 
       {hits !== null && (
         <div className="debug-results">
+          {(degraded.length > 0 || diag?.flags) && (
+            <div className={`debug-flags ${degraded.length > 0 ? 'degraded' : ''}`}>
+              <div className="debug-flag-row">
+                <span className="debug-flag-label">生效开关</span>
+                {Object.entries(diag?.flags ?? {}).map(([k, v]) => (
+                  <span key={k} className={`flag-chip ${v ? 'on' : 'off'}`} title={k}>
+                    {k.replace('retrieval.', '').replace('.enabled', '')}={v ? 'on' : 'off'}
+                  </span>
+                ))}
+              </div>
+              {diag && (
+                <div className="debug-flag-row">
+                  <span className="debug-flag-label">逐路</span>
+                  <span className="flag-chip">
+                    向量 {diag.vector_count ?? 0} 条 / {diag.vector_ms ?? '—'}ms
+                  </span>
+                  <span className="flag-chip">
+                    关键词 {diag.keyword_count ?? 0} 条 / {diag.keyword_ms ?? '—'}ms
+                  </span>
+                  <span className="flag-chip">融合 {diag.fused_count ?? 0} 条</span>
+                  <span className="flag-chip">精排 {diag.rerank_ms ?? '—'}ms</span>
+                </div>
+              )}
+              {degraded.length > 0 && (
+                <div className="debug-degraded">
+                  ⚠ 本轮降级：{degraded.map((f) => DEGRADED_TEXT[f] ?? f).join('；')}
+                </div>
+              )}
+            </div>
+          )}
           <div className="debug-meta">
             命中 {hits.length} 条
             {elapsed !== null && ` · 端到端 ${Math.round(elapsed)}ms`}
@@ -139,15 +206,28 @@ export default function KbDebugPage() {
                   <span className="hit-rank">[{h.n}]</span>
                   <span className="hit-title">{h.title}</span>
                   {h.page !== null && <span className="hit-page">第 {h.page} 段</span>}
-                  <span className="hit-score" title="cosine 相似度">
-                    {h.score.toFixed(4)}
+                  {h.sources.map((src) => (
+                    <span key={src} className={`src-chip ${src}`}>
+                      {src === 'vector' ? '向量' : '关键词'}
+                    </span>
+                  ))}
+                  <span className="hit-score" title={h.rerank_score != null ? '精排分' : '融合/向量分'}>
+                    {fmt(h.rerank_score ?? h.score)}
                   </span>
                 </div>
                 <div className="hit-bar">
                   <div
                     className="hit-bar-fill"
-                    style={{ width: `${maxScore > 0 ? (h.score / maxScore) * 100 : 0}%` }}
+                    style={{
+                      width: `${maxScore > 0 ? ((h.rerank_score ?? h.score) / maxScore) * 100 : 0}%`,
+                    }}
                   />
+                </div>
+                <div className="hit-scores">
+                  <span>向量 <b>{fmt(h.vector_score)}</b></span>
+                  <span>关键词 <b>{fmt(h.keyword_score)}</b></span>
+                  <span>RRF <b>{h.rrf_score == null ? '—' : h.rrf_score.toFixed(5)}</b></span>
+                  <span>精排 <b>{fmt(h.rerank_score)}</b></span>
                 </div>
                 <div className="hit-snippet">{h.snippet}</div>
                 <button className="linklike" onClick={() => setExpanded(expanded === h.n ? null : h.n)}>

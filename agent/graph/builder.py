@@ -41,7 +41,8 @@ def assemble_graph(*, checkpointer: BaseCheckpointSaver | None = None) -> Any:
     async def chat(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         cfg = config["configurable"]
         return await nodes.chat_node(
-            state, llm=cfg["llm"], groundedness_enabled=cfg.get("groundedness_enabled", True)
+            state, llm=cfg["llm"], groundedness_enabled=cfg.get("groundedness_enabled", True),
+            redis=cfg.get("redis"),
         )
 
     async def execute(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -160,6 +161,7 @@ async def run_agent_turn(
     message_id: str = "",
     trace_id: str = "",
     content: str = "",
+    redis: Any = None,
     token_budget: int = 30000,
     max_parallel: int = 3,
     groundedness_enabled: bool = True,
@@ -198,6 +200,7 @@ async def run_agent_turn(
             "tool_ctx": tool_ctx,
             "token_budget": token_budget,
             "groundedness_enabled": groundedness_enabled,
+            "redis": redis,  # 供 chat 分支读 feature flag / 工具层复用
         }
     }
 

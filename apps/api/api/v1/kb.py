@@ -32,6 +32,7 @@ from apps.api.core.config import settings
 from apps.api.core.db import tenant_session
 from apps.api.core.deps import UserCtx, current_user
 from apps.api.core.errors import AppError, ErrorCode
+from apps.api.core.redis import get_redis
 from apps.api.core.upload_guard import (
     UploadRejected,
     check_suffix,
@@ -225,9 +226,9 @@ async def search_kb(
     try:
         qvec = await retriever.embed_query(req.query)
         async with tenant_session(user.id) as session:
-            hits = await retriever.search(
+            outcome = await retriever.search(
                 session, user.id, req.query, qvec=qvec,
-                top_k=req.top_k * 3, max_contexts=req.top_k,
+                top_k=req.top_k * 3, max_contexts=req.top_k, redis=get_redis(),
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("kb/search 失败 uid=%s: %s", user.id, exc)
@@ -235,17 +236,27 @@ async def search_kb(
     return {
         "data": {
             "query": req.query,
+            # 逐路对比视图（M6）：每命中带各路分数与来源，便于判断
+            # 「混合检索/RRF/精排各自贡献了什么」，也是降级排障的第一现场
             "hits": [
                 {
                     "n": h.rank,
                     "score": h.score,
+                    "rerank_score": h.rerank_score,
+                    "vector_score": h.vector_score,
+                    "keyword_score": h.keyword_score,
+                    "rrf_score": h.rrf_score,
+                    "sources": h.sources,
                     "document_id": str(h.document_id) if h.document_id else None,
                     "title": h.document_title,
                     "page": h.page,
                     "snippet": h.child_content[:200],
                     "parent_content": h.parent_content,
                 }
-                for h in hits
+                for h in outcome.hits
             ],
+            "degraded": outcome.degraded,
+            "diagnostics": outcome.diagnostics,
+            "elapsed_ms": outcome.elapsed_ms,
         }
     }

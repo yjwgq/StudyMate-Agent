@@ -155,6 +155,7 @@ async def run_turn_task(spec: TurnSpec) -> None:
             groundedness_enabled=settings.groundedness_enabled,
             checkpointer=checkpointer,
             resume_command=spec.resume_command,
+            redis=redis,  # M6：chat 分支读 feature flag
         ):
             if kind == "event":
                 etype = item.get("type")

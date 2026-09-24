@@ -787,3 +787,106 @@ body {
   align-self: flex-start;
   font-size: 12px;
 }
+
+/* ============================================================
+   M6：检索调试台的逐路对比与降级观察
+   ============================================================ */
+
+.debug-flags {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.debug-flags.degraded {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.debug-flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.debug-flag-label {
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.flag-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.flag-chip.on {
+  color: #059669;
+  border-color: #059669;
+}
+
+.flag-chip.off {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.debug-degraded {
+  font-size: 12.5px;
+  color: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+  .debug-degraded {
+    color: #fbbf24;
+  }
+}
+
+/* 命中来源徽标（向量 / 关键词） */
+.src-chip {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.src-chip.vector {
+  color: #2563eb;
+  border-color: #2563eb;
+}
+
+.src-chip.keyword {
+  color: #7c3aed;
+  border-color: #7c3aed;
+}
+
+/* 逐路分数明细行 */
+.hit-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hit-scores b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* 降级角标变体：检索不可用（红） vs 质量下降（黄） */
+.degraded-badge.severe {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(220, 38, 38, 0.06);
+}

@@ -27,6 +27,8 @@ interface Citation {
   page: number | null;
   snippet: string;
   score: number;
+  /** M6：精排分（未精排时为 null）；有值时优先展示，标题注明来源 */
+  rerank_score?: number | null;
 }
 
 interface ApprovalCard {
@@ -88,6 +90,27 @@ function parseSseBlock(block: string): SseEvent | null {
   }
 }
 
+/** 降级标记 → 用户可读角标文案（§8.3：必须让用户知道哪一环降级了）。 */
+const DEGRADED_TEXT: Record<string, string> = {
+  rerank: '未精排（排序质量下降）',
+  vector: '未走向量检索',
+  keyword: '未走关键词检索',
+  retrieval: '本轮未使用知识库',
+  groundedness: '部分结论缺少资料支撑',
+  groundedness_rewrite_failed: '引用重写失败',
+  planner_error: '任务规划失败',
+  planner_parse: '任务规划解析失败',
+  planner_invalid: '任务规划不合法',
+  replan: '执行中重新规划过',
+};
+
+const degradedLabels = (flags: string[]) =>
+  flags.map((f) => DEGRADED_TEXT[f] ?? f).join('、');
+
+/** 角标样式变体：精排降级（黄）与检索不可用（红）视觉上区分开。 */
+const degradedVariant = (flags: string[]) =>
+  flags.some((f) => f === 'retrieval') ? 'severe' : 'warn';
+
 let seq = 0;
 const nextId = () => `m${++seq}`;
 
@@ -132,11 +155,14 @@ export default function ChatPage() {
       const restored: Message[] = [];
       for (const it of items) {
         if (it.role !== 'user' && it.role !== 'assistant') continue;
+        // degraded 落库形状是 {flags, groundedness}；角标只吃 flags
+        const dg = it.degraded as { flags?: string[] } | null | undefined;
         restored.push({
           id: nextId(),
           role: it.role as Role,
           content: it.content ?? '',
           citations: it.citations ?? undefined,
+          degraded: dg?.flags ?? undefined,
           status: it.status,
           serverId: it.id,
         });
@@ -555,8 +581,12 @@ export default function ChatPage() {
                           <span className="citation-n">[{c.n}]</span>
                           <span className="citation-title">{c.title}</span>
                           {c.page !== null && <span className="citation-page">第 {c.page} 段</span>}
-                          <span className="citation-score" title="cosine 相似度">
-                            {c.score.toFixed(3)}
+                          <span
+                            className="citation-score"
+                            title={c.rerank_score != null ? '精排分（rerank）' : 'cosine 相似度'}
+                          >
+                            {(c.rerank_score != null ? c.rerank_score : c.score).toFixed(3)}
+                            {c.rerank_score != null ? ' ⤴' : ''}
                           </span>
                         </summary>
                         <div className="citation-body">{c.snippet}</div>
@@ -601,8 +631,11 @@ export default function ChatPage() {
                   </div>
                 )}
                 {hasDegraded && (
-                  <div className="degraded-badge" title={m.degraded!.join(', ')}>
-                    ⚠ 部分结论缺少资料支撑（降级：{m.degraded!.join('、')}）
+                  <div
+                    className={`degraded-badge ${degradedVariant(m.degraded!)}`}
+                    title={`降级标记：${m.degraded!.join('、')}`}
+                  >
+                    ⚠ {degradedLabels(m.degraded!)}
                   </div>
                 )}
                 {m.role === 'assistant' && !streaming && m.serverId && (

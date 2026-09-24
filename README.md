@@ -14,15 +14,16 @@
 | M3 | 单路 RAG + 可观测 + 评测基建（pgvector 检索带引用 / Langfuse trace + PII 脱敏 / golden 50 条 + 噪声地板） | ✅ 完成（2026-09-23 验收 D1–D7 通过） |
 | M4 | Agent 运行时（planner DAG 并行 / ReAct 四类终止 / 工具治理 fail-closed / MCP 三件套 / checkpointer / 预算降级） | ✅ 完成（2026-09-24 验收 E1–E8 通过） |
 | M5 | HITL 审批 + 流式健壮性（L2 审批卡片 / 执行与传输解耦 / kill -9 后 checkpoint 续跑 / 取消与重新生成） | ✅ 完成（2026-09-24 验收 F1–F6 通过） |
-| M6 | 生产级 RAG + 降级矩阵 | ⏭️ 下一个 |
-| M7 · M10 | 评测对比 + CI 门禁 / 收尾交付 | ⏳ 未开始 |
+| M6 | 生产级 RAG + 降级矩阵（混合检索 + RRF + 精排 + 三条降级链与可见角标） | ✅ 完成（2026-09-24 验收 G1–G4：G2/G3/G4 通过，G1 见手册说明） |
+| M7 | 评测对比 + CI 门禁（扩集重标 + 对比表归因 + GitHub Actions） | ⏭️ 下一个 |
+| M10 | 收尾与交付资产 | ⏳ 未开始 |
 
 ## 文档
 
 | 文档 | 用途 |
 |------|------|
 | [`项目实施计划.md`](./项目实施计划.md) | **施工依据**：里程碑、任务分解、验收标准、进度追踪 |
-| [`M1_验收手册.md`](./M1_验收手册.md) – [`M5_验收手册.md`](./M5_验收手册.md) | 各里程碑验收记录（含实测发现与修复） |
+| [`M1_验收手册.md`](./M1_验收手册.md) – [`M6_验收手册.md`](./M6_验收手册.md) | 各里程碑验收记录（含实测发现与修复） |
 | [`docs/design/PersonalAgent_设计文档_v1.1.md`](./docs/design/PersonalAgent_设计文档_v1.1.md) | 设计依据：架构、ADR、DDL、协议 |
 | [`docs/design/PersonalAgent_设计文档_评审报告.md`](./docs/design/PersonalAgent_设计文档_评审报告.md) | 设计评审：45 条问题与改进方案 |
 
@@ -54,7 +55,7 @@ docker compose -f infra/docker-compose.dev.yml up -d --build
 |------|------|
 | http://localhost:8080 | 对话（Agent 自动规划：普通问答走 RAG 引用，任务型走 DAG 并行 + 工具） |
 | http://localhost:8080/kb | 知识库：文档列表 / 上传 / 入库进度 |
-| http://localhost:8080/kb/debug | 检索调试台：命中分数 + 注入的父块全文 |
+| http://localhost:8080/kb/debug | 检索调试台：逐路对比（向量/关键词/RRF/精排分）+ 降级观察 |
 | http://localhost:8080/api/v1/health | 存活检查 |
 | http://localhost:8080/api/v1/ready | 就绪检查（LLM / JWT / DB / Redis） |
 | http://localhost:8080/api/v1/config | 查看当前配置（不回显密钥） |

@@ -52,6 +52,27 @@ def _degraded_event(flags: list[str], message: str) -> dict[str, Any]:
     return {"type": "degraded", "degraded": flags, "message": message}
 
 
+# 降级标记 → 用户可读文案（§8.3：降级必须显式，且要让用户看懂**哪一环**降级了）
+_DEGRADED_TEXT: dict[str, str] = {
+    "rerank": "未精排（排序质量下降）",
+    "vector": "未走向量检索（语义相近但用词不同的内容可能漏）",
+    "keyword": "未走关键词检索（专名/术语精确匹配下降）",
+    "retrieval": "本轮未使用知识库",
+    "groundedness": "部分结论缺少资料支撑",
+    "groundedness_rewrite_failed": "引用重写失败",
+    "planner_error": "任务规划失败（已按普通问答处理）",
+    "planner_parse": "任务规划解析失败（已按普通问答处理）",
+    "planner_invalid": "任务规划不合法（已按普通问答处理）",
+    "replan": "执行过程中重新规划过",
+}
+
+
+def _degraded_message(flags: list[str]) -> str:
+    """把降级标记拼成一句用户能看懂的话（前端另有逐 flag 角标）。"""
+    parts = [_DEGRADED_TEXT.get(f, f) for f in flags]
+    return "；".join(parts) if parts else "本轮结果有降级"
+
+
 # ---------------- planner 节点 ----------------
 
 
@@ -98,26 +119,45 @@ def _last_user_text(messages: list) -> str:
 # ---------------- chat 分支（M3 RAG 管线移植） ----------------
 
 
-async def _retrieve(user_id: str, query: str) -> tuple[list, list[dict], str, list[str]]:
+async def _retrieve(
+    user_id: str, query: str, *, redis: Any = None
+) -> tuple[list, list[dict], str, list[str], dict]:
+    """检索（M6：混合检索 + 精排 + 降级信号）。
+
+    返回 (hits, citations, context_blocks, degraded, diagnostics)。
+
+    降级语义（§8.3）：embedding / 关键词路 / 精排的失败都在检索层**内部**处理
+    （各自标记），只有「整体不可用」才需要在这里兜底成 degraded:retrieval。
+    """
     degraded: list[str] = []
     retriever = get_retriever()
+    qvec = None
     try:
         qvec = await retriever.embed_query(query)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("query embedding 失败，降级无 RAG: %s", exc)
-        return [], [], "", ["retrieval"]
+    except Exception as exc:  # noqa: BLE001 —— 向量路故障，关键词路仍可工作
+        logger.warning("query embedding 失败（交由检索层降级）: %s", exc)
     from uuid import UUID
 
     from apps.api.core.db import tenant_session
 
     try:
         async with tenant_session(UUID(user_id)) as session:
-            hits = await retriever.search(session, UUID(user_id), query, qvec=qvec)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("检索查询失败，降级无 RAG: %s", exc)
-        return [], [], "", ["retrieval"]
+            outcome = await retriever.search(
+                session, UUID(user_id), query, qvec=qvec, redis=redis
+            )
+    except Exception as exc:  # noqa: BLE001 —— 整体检索失败：无 RAG
+        logger.warning("检索整体失败，降级无 RAG: %s", exc)
+        return [], [], "", ["retrieval"], {}
+    hits = outcome.hits
+    degraded.extend(outcome.degraded)
     citations = build_citations(hits)
-    return hits, citations, build_context_blocks(hits) if hits else "", degraded
+    return (
+        hits,
+        citations,
+        build_context_blocks(hits) if hits else "",
+        degraded,
+        outcome.diagnostics,
+    )
 
 
 def _build_rag_messages(content: str, context_blocks: str) -> list[dict[str, str]]:
@@ -131,15 +171,26 @@ def _build_rag_messages(content: str, context_blocks: str) -> list[dict[str, str
     ]
 
 
-async def chat_node(state: AgentState, *, llm: Any, groundedness_enabled: bool = True) -> dict[str, Any]:
-    """M3 单路 RAG 的图内移植：行为与 M3 验收口径一致。"""
+async def chat_node(
+    state: AgentState, *, llm: Any, groundedness_enabled: bool = True, redis: Any = None
+) -> dict[str, Any]:
+    """chat 分支（M6：混合检索 + 精排 + 降级标记）。
+
+    redis 经 config["configurable"] 注入（**不能放 state**：Redis 客户端
+    不可序列化，会被 checkpoint 写入搞崩）。
+    """
     content = _last_user_text(state["messages"])
     degraded_flags: list[str] = list(state.get("degraded") or [])
     citations: list[dict] = []
     grounded_stats: dict | None = None
 
-    hits, citations, context_blocks, degraded = await _retrieve(state["user_id"], content)
+    hits, citations, context_blocks, degraded, diagnostics = await _retrieve(
+        state["user_id"], content, redis=redis
+    )
     degraded_flags.extend(degraded)
+    if degraded:
+        # §8.3：降级必须显式 —— 立刻推 degraded 事件（前端角标），不等终态
+        _emit(_degraded_event(degraded, _degraded_message(degraded)))
     if citations:
         _emit({"type": "citations", "citations": citations})
 

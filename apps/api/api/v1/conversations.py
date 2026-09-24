@@ -100,6 +100,10 @@ async def list_messages(
                     "role": m["role"],
                     "content": m["content"],
                     "status": m["status"],
+                    # M6：历史恢复必须带上引用与降级标记 —— 否则刷新页面后
+                    # 引用脚注与降级角标全部消失（F4 自愈路径依赖这两项）
+                    "citations": m.get("citations"),
+                    "degraded": m.get("degraded"),
                     "created_at": m["created_at"].isoformat(),
                 }
                 for m in messages

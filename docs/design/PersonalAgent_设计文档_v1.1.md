@@ -350,7 +350,7 @@ v1 的 `CLOUD_MODEL_GUIDE.md` 称"切换模式不影响已入库数据"——**�
 |------|--------|------|
 | LLM | **DeepSeek** | 不接 OpenAI / Azure OpenAI |
 | Embedding | **通义千问 text-embedding**（DashScope 兼容模式） | 返回维度必须是 **1024**，与 DDL 一致 |
-| Reranker | `bge-reranker-v2-m3` | MVP 走云端 API |
+| Reranker | `qwen3.7-text-rerank` | MVP 走云端 API（DashScope 原生 text-rerank 端点）|
 
 **放弃的替代方案**：
 
@@ -393,7 +393,7 @@ v1 的 `CLOUD_MODEL_GUIDE.md` 称"切换模式不影响已入库数据"——**�
 | 异步任务 | celery[redis]、redis-py | celery>=5.4 | gevent pool + 常驻事件循环 |
 | 数据库 | PostgreSQL 16、pgvector、SQLAlchemy 2 (async)、Alembic | — | pgvector>=0.8（iterative_scan） |
 | 中文分词 | jieba | — | 应用层分词写入 `content_tokens` |
-| 检索 | pgvector HNSW、tsvector/ts_rank_cd、bge-reranker-v2-m3 | — | 阈值按模型标定 |
+| 检索 | pgvector HNSW、tsvector/ts_rank_cd、qwen3.7-text-rerank | — | 阈值按模型标定 |
 | 解析 | PyMuPDF（文本型）、unstructured/MinerU（表格）、PaddleOCR（扫描件） | — | 按类型路由 |
 | 鉴权 | python-jose、passlib[bcrypt]、OAuth2 Password Flow | — | refresh token 轮转 |
 | 加密 | cryptography (AES-256-GCM) | — | 第三方凭据 envelope encryption |
@@ -1104,7 +1104,7 @@ query（查询侧先经 jieba 分词，供关键词路使用）
       · 向量路：embedding cosine (<=>) + user_id 过滤 + hnsw.iterative_scan
       · 关键词路：tsv (ts_rank_cd)
  → RRF 融合（k=60）去重 → 候选 ~50
- → Reranker（bge-reranker-v2-m3，cross-encoder）精排 → top 6
+ → Reranker（qwen3.7-text-rerank，cross-encoder 类）精排 → top 6
  → 父块回溯（按 parent_id 取父块，相邻父块去重）→ 注入上下文（附 chunk_id）
 ```
 
@@ -1476,7 +1476,7 @@ EMBED_DIM=1024                  # 与 DDL 锁定，启动自检
 # Reranker：阈值需按模型标定（ADR-8 第 4 条）
 RERANK_BASE_URL=
 RERANK_API_KEY=
-RERANK_MODEL=bge-reranker-v2-m3
+RERANK_MODEL=qwen3.7-text-rerank   # 阈值必须按本模型标定（ADR-8 第 4 条）
 
 # ---- 鉴权与加密 ----
 JWT_SECRET=***

@@ -79,6 +79,29 @@ class Settings(BaseSettings):
     retrieval_parent_max_chars: int = 1600  # 单个父块注入上下文的字符上限
     retrieval_snippet_max_chars: int = 200  # 引用脚注里展示的子块摘要长度
 
+    # ---------------- 混合检索与降级矩阵（M6，§8.2 / §8.3）----------------
+    # 每路召回条数：ADR-2 指出多租户过滤下 HNSW 召回会坍塌，故候选池放大
+    # （设计文档 §8.2「每路 top 200，为过滤召回损失留余量」）
+    hybrid_top_k: int = 200
+    rrf_k: int = 60                         # RRF 融合常数（§8.2）
+    rrf_candidates: int = 50                # 融合后进入精排的候选数
+    # 超时即降级（§8.3 降级矩阵；与 SLO 目标值不可混用，见设计文档 §5.3）
+    retrieval_vector_timeout_s: float = 0.5
+    retrieval_keyword_timeout_s: float = 0.5
+    # feature flag 默认值（§14.3：配置文件 + Redis 覆写；覆写见 agent/retrieval/flags.py）
+    retrieval_hybrid_enabled: bool = True   # 关 → 完全走 M3 单路（G1 的对照管线）
+    retrieval_rerank_enabled: bool = True   # 关 → 用 RRF 顺序（G2 的模拟故障）
+    retrieval_vector_enabled: bool = True   # 关 → 模拟向量依赖故障（G3）
+    retrieval_keyword_enabled: bool = True  # 关 → 模拟关键词依赖故障
+
+    # ---------------- Reranker（M6，§8.2 / ADR-8）----------------
+    # DashScope 原生 text-rerank 端点（非 OpenAI 兼容），Bearer 鉴权
+    rerank_base_url: str = ""
+    rerank_api_key: str = ""
+    rerank_model: str = ""
+    rerank_timeout_s: float = 0.8           # §8.3：超时 → degraded:rerank
+    rerank_top_n: int = 6                   # 精排后保留的父块数（与 max_contexts 对齐）
+
     # ---------------- Groundedness（M3，§8.4）----------------
     groundedness_enabled: bool = True
     groundedness_threshold: float = 0.20    # 无出处事实句占比 > 20% → 重写一次
@@ -99,6 +122,11 @@ class Settings(BaseSettings):
     @property
     def embed_configured(self) -> bool:
         return bool(self.embed_base_url and self.embed_api_key and self.embed_model)
+
+    @property
+    def rerank_configured(self) -> bool:
+        """Reranker 是否已配置。未配置时精排直接降级（§8.3），不阻断检索。"""
+        return bool(self.rerank_base_url and self.rerank_api_key and self.rerank_model)
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -91,6 +91,7 @@ def _hits_to_state(hits: list[dict[str, Any]], *, start_n: int) -> tuple[list[Ci
                 page=h.get("page"),
             )
         )
+        rerank_raw = h.get("rerank_score")
         citations.append(
             Citation(
                 n=start_n + i,
@@ -101,6 +102,8 @@ def _hits_to_state(hits: list[dict[str, Any]], *, start_n: int) -> tuple[list[Ci
                 page=h.get("page"),
                 snippet=str(h.get("content", ""))[:200],
                 score=float(h.get("score", 0.0)),
+                # M6：精排分（未精排时为 None）—— 前端据此显示"精排分/相似度"
+                rerank_score=float(rerank_raw) if rerank_raw is not None else None,
             )
         )
     return citations, chunks

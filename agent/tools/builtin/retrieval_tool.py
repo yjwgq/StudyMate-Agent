@@ -5,7 +5,6 @@ retrieval 与 M3 的 /kb/search 调试台共用同一 Retriever —— 检索质
 并由 react 层映射进 state.retrieved / state.citations。
 """
 
-import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -42,22 +41,50 @@ class RetrievalTool(BaseTool):
 
         started = time.perf_counter()
         retriever = get_retriever()
-        qvec = await retriever.embed_query(query)
+        redis = (ctx.extra or {}).get("redis")
+        outcome = None
         from apps.api.core.db import tenant_session
 
-        async with tenant_session(UUID(ctx.user_id)) as session:
-            hits = await retriever.search(session, UUID(ctx.user_id), query, qvec=qvec, max_contexts=top_k)
+        if redis is not None:
+            # 向量预计算放在事务外（嵌入式 embedding 是网络调用，别占死连接池）；
+            # 失败则交给检索层按「向量路故障」降级（§8.3），不直接中断
+            try:
+                qvec = await retriever.embed_query(query)
+            except Exception:  # noqa: BLE001 —— embedding 挂了还有关键词路
+                qvec = None
+            async with tenant_session(UUID(ctx.user_id)) as session:
+                outcome = await retriever.search(
+                    session, UUID(ctx.user_id), query, qvec=qvec,
+                    max_contexts=top_k, redis=redis,
+                )
+        else:
+            async with tenant_session(UUID(ctx.user_id)) as session:
+                outcome = await retriever.search(
+                    session, UUID(ctx.user_id), query, max_contexts=top_k
+                )
+        hits = outcome.hits
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
         if not hits:
+            note = "知识库中没有找到相关资料。可建议用户上传相关文档。"
+            if outcome.degraded:
+                note += f"（检索过程中有降级：{'、'.join(outcome.degraded)}）"
             return ToolResult(
                 ok=True,
-                content="知识库中没有找到相关资料。可建议用户上传相关文档。",
-                latency_ms=int((time.perf_counter() - started) * 1000),
+                content=note,
+                data={"hits": [], "degraded": outcome.degraded, "diagnostics": outcome.diagnostics},
+                latency_ms=latency_ms,
             )
         lines = []
         for h in hits:
             page = f"（第 {h.page} 段）" if h.page is not None else ""
             lines.append(f"[{h.rank}] 《{h.document_title}》{page}\n{h.parent_content}")
-        # 命中结构随结果带给 react 层（映射进 state.retrieved/citations）
+        if outcome.degraded:
+            lines.append(f"（注意：本次检索有降级：{'、'.join(outcome.degraded)}）")
+
+        # 命中结构随结果带给 react 层（映射进 state.retrieved/citations）。
+        # M6 修：此前写在 error_code 里（"HITS:{json}"）而读取端读的是 data 字段
+        # → ReAct 分支的 state.citations/retrieved 恒为空（M4 遗留的技术债）。
         payload = {
             "hits": [
                 {
@@ -66,20 +93,26 @@ class RetrievalTool(BaseTool):
                     "document_id": str(h.document_id),
                     "document_title": h.document_title,
                     "score": h.score,
+                    "rerank_score": h.rerank_score,
+                    "vector_score": h.vector_score,
+                    "keyword_score": h.keyword_score,
+                    "rrf_score": h.rrf_score,
+                    "sources": h.sources,
                     "content": h.child_content,
                     "parent_content": h.parent_content,
                     "page": h.page,
                 }
                 for h in hits
-            ]
+            ],
+            "degraded": outcome.degraded,
+            "diagnostics": outcome.diagnostics,
         }
         return ToolResult(
             ok=True,
             content="\n\n".join(lines),
-            latency_ms=int((time.perf_counter() - started) * 1000),
-        ).model_copy(update={"error_code": "HITS:" + json.dumps(payload, ensure_ascii=False)})
-        # 说明：hits 结构经 error_code 字段携带是权宜之计——见 react.py 的
-        # parse_hits；M6 检索精排重构时改为 ToolResult.data 字段
+            data=payload,
+            latency_ms=latency_ms,
+        )
 
 
 class FetchFullArgs(ToolArgs):

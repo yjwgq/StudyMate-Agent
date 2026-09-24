@@ -8,12 +8,20 @@
              返回 503 + problems 列表，但不重启进程（重启也没用）。
 """
 
+import json
+import logging
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from apps.api.core.config import settings
-from apps.api.core.db import check_db
-from apps.api.core.redis import check_redis
+from apps.api.core.db import check_db, session_scope
+from apps.api.core.errors import AppError, ErrorCode
+from apps.api.core.redis import check_redis, get_redis
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["meta"])
 
@@ -64,4 +72,73 @@ async def config_summary() -> dict[str, object]:
         "jwt_secret_set": settings.jwt_configured,
         "access_ttl_min": settings.access_ttl_min,
         "refresh_ttl_days": settings.refresh_ttl_days,
+        "rerank_configured": settings.rerank_configured,
+        "rerank_model": settings.rerank_model or "(未配置)",
+        "hybrid_top_k": settings.hybrid_top_k,
+        "rrf_k": settings.rrf_k,
     }
+
+
+# ---------------- 检索 feature flag（M6，§14.3） ----------------
+
+
+class FlagUpdate(BaseModel):
+    name: str = Field(description="flag 名，如 retrieval.rerank.enabled")
+    value: bool | None = Field(
+        default=None, description="true/false 写入覆写；null 清除覆写（回到配置默认）"
+    )
+
+
+def _require_dev() -> None:
+    """flag 是**全局**开关，开放给普通用户等于给所有人关掉检索能力。
+
+    因此只在开发环境暴露（生产经 .env 配置或运维通道变更）。
+    """
+    if settings.app_env != "dev":
+        raise AppError(ErrorCode.FORBIDDEN, "feature flag 仅在 dev 环境可变更", 403)
+
+
+@router.get("/flags")
+async def get_flags_endpoint() -> dict[str, object]:
+    """当前生效的检索 flag（含来源：配置默认 / Redis 覆写）。
+
+    只读接口不限制环境 —— 验收与评测需要确认「开关真的生效了」。
+    """
+    from agent.retrieval.flags import get_flags
+
+    flags = await get_flags(get_redis(), use_cache=False)
+    return {
+        "data": {
+            "flags": flags.as_dict(),
+            "overridden": list(flags.overridden),
+        }
+    }
+
+
+@router.post("/flags")
+async def set_flag_endpoint(req: FlagUpdate) -> dict[str, object]:
+    """写入/清除 flag 覆写（dev only）；变更落 audit_logs（§13.12）。"""
+    from agent.retrieval.flags import get_flags, is_known_flag, set_flag
+
+    _require_dev()
+    if not is_known_flag(req.name):
+        raise AppError(ErrorCode.VALIDATION, f"未知 flag：{req.name}", 422)
+    redis = get_redis()
+    await set_flag(redis, req.name, req.value)
+    try:
+        async with session_scope() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO audit_logs (user_id, actor_type, action, target, payload)
+                    VALUES (NULL, 'system', 'flag.changed', :target, CAST(:payload AS JSONB))
+                """),
+                {
+                    "target": req.name,
+                    "payload": json.dumps({"value": req.value}, ensure_ascii=False),
+                },
+            )
+    except Exception:  # noqa: BLE001 —— 审计失败不改变开关结果
+        logger.warning("flag 变更审计写入失败", exc_info=True)
+
+    flags = await get_flags(redis, use_cache=False)
+    return {"data": {"flags": flags.as_dict(), "overridden": list(flags.overridden)}}

@@ -256,8 +256,8 @@ async def list_messages(
         params["cseq"] = cursor_seq
     row = await session.execute(
         text(f"""
-            SELECT id, seq, role, content, status, citations, token_usage,
-                   created_at
+            SELECT id, seq, role, content, status, citations, degraded,
+                   token_usage, created_at
             FROM messages
             {conditions}
             ORDER BY seq ASC
