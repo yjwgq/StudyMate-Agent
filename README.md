@@ -15,15 +15,15 @@
 | M4 | Agent 运行时（planner DAG 并行 / ReAct 四类终止 / 工具治理 fail-closed / MCP 三件套 / checkpointer / 预算降级） | ✅ 完成（2026-09-24 验收 E1–E8 通过） |
 | M5 | HITL 审批 + 流式健壮性（L2 审批卡片 / 执行与传输解耦 / kill -9 后 checkpoint 续跑 / 取消与重新生成） | ✅ 完成（2026-09-24 验收 F1–F6 通过） |
 | M6 | 生产级 RAG + 降级矩阵（混合检索 + RRF + 精排 + 三条降级链与可见角标） | ✅ 完成（2026-09-24 验收 G1–G4：G2/G3/G4 通过，G1 见手册说明） |
-| M7 | 评测对比 + CI 门禁（扩集重标 + 对比表归因 + GitHub Actions） | ⏭️ 下一个 |
-| M10 | 收尾与交付资产 | ⏳ 未开始 |
+| M7 | 评测对比 + CI 门禁（真实语料扩集重标 / 五管线对比与归因 / GitHub Actions） | ✅ 完成（H1/H2 通过；H3 待推送确认 CI 全绿）|
+| M10 | 收尾与交付资产 | ⏭️ 下一个 |
 
 ## 文档
 
 | 文档 | 用途 |
 |------|------|
 | [`项目实施计划.md`](./项目实施计划.md) | **施工依据**：里程碑、任务分解、验收标准、进度追踪 |
-| [`M1_验收手册.md`](./M1_验收手册.md) – [`M6_验收手册.md`](./M6_验收手册.md) | 各里程碑验收记录（含实测发现与修复） |
+| [`M1_验收手册.md`](./M1_验收手册.md) – [`M7_验收手册.md`](./M7_验收手册.md) | 各里程碑验收记录（含实测发现与修复） |
 | [`docs/design/PersonalAgent_设计文档_v1.1.md`](./docs/design/PersonalAgent_设计文档_v1.1.md) | 设计依据：架构、ADR、DDL、协议 |
 | [`docs/design/PersonalAgent_设计文档_评审报告.md`](./docs/design/PersonalAgent_设计文档_评审报告.md) | 设计评审：45 条问题与改进方案 |
 
@@ -67,6 +67,7 @@ uv sync
 uv run pytest tests/unit -v          # 单元测试（无需数据库）
 uv run pytest tests/security -v      # 安全集成测试（需要开发栈已启动）
 uv run pytest tests/integration -v   # M4 Agent 全图集成测试（fake LLM，不烧额度）
+bash scripts/ci_local.sh             # 本地跑一遍 CI 的三道门禁（与 .github/workflows/ci.yml 对应）
 
 # M3 端到端验收（D1–D5，需栈运行 + 语料已入库）
 uv run python scripts/m3_acceptance.py
