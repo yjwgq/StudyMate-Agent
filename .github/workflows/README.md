@@ -1,8 +1,10 @@
 GitHub Actions 工作流目录。
 
-规划（设计文档 v1.1 §15.2）：
-    ci.yml   PR 触发：ruff + mypy + pytest（含 security 用例）
-             + 前端 build + 60 条评测冒烟（阈值基于噪声地板 2σ）
-    deploy.yml   main 触发：构建镜像、打 tag、可选部署
+    ci.yml       PR / push 触发：后端（ruff + mypy + 单测）、前端（tsc + build）、
+                 迁移可加载性 —— 只跑**不依赖本地栈**的检查（M7-4）
 
-待 M7 落地评测门禁后创建 ci.yml。
+刻意不放进 CI 的（设计决策，见 M7 验收手册）：
+    · tests/security（需要 PostgreSQL + Redis）—— 本地人工跑
+    · tests/integration（Agent 全图，需栈）—— 本地人工跑
+    · 评测冒烟（真实语料 + 模型额度，慢且烧钱）—— 本地人工跑，报告归档到 evals/reports/
+    · deploy.yml（构建镜像 / 部署）—— 未纳入 MVP 范围（本地 compose 已足够）

@@ -1,0 +1,161 @@
+{
+  "eval_set": "evals/golden_v2.jsonl（68 条 = v1 的 50 条[跨文档分级对称修正] + 18 条真实语料人工题）",
+  "baseline_single_path": {
+    "n": {
+      "count": 68
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 0.924
+    },
+    "ndcg@10": {
+      "mean": 0.9497
+    },
+    "latency_p50_ms": {
+      "ms": 165
+    },
+    "latency_p95_ms": {
+      "ms": 207
+    }
+  },
+  "hybrid_rrf": {
+    "n": {
+      "count": 68
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 0.9387
+    },
+    "ndcg@10": {
+      "mean": 0.9567
+    },
+    "latency_p50_ms": {
+      "ms": 157
+    },
+    "latency_p95_ms": {
+      "ms": 185
+    }
+  },
+  "hybrid_rerank": {
+    "n": {
+      "count": 68
+    },
+    "recall@10": {
+      "mean": 1.0
+    },
+    "mrr@10": {
+      "mean": 0.9485
+    },
+    "ndcg@10": {
+      "mean": 0.9554
+    },
+    "latency_p50_ms": {
+      "ms": 416
+    },
+    "latency_p95_ms": {
+      "ms": 463
+    }
+  },
+  "vector_down_single": {
+    "n": {
+      "count": 68
+    },
+    "recall@10": {
+      "mean": 0.0
+    },
+    "mrr@10": {
+      "mean": 0.0
+    },
+    "ndcg@10": {
+      "mean": 0.0
+    },
+    "latency_p50_ms": {
+      "ms": 151
+    },
+    "latency_p95_ms": {
+      "ms": 183
+    }
+  },
+  "vector_down_hybrid": {
+    "n": {
+      "count": 68
+    },
+    "recall@10": {
+      "mean": 0.9926
+    },
+    "mrr@10": {
+      "mean": 0.9485
+    },
+    "ndcg@10": {
+      "mean": 0.9514
+    },
+    "latency_p50_ms": {
+      "ms": 344
+    },
+    "latency_p95_ms": {
+      "ms": 396
+    }
+  },
+  "attribution": {
+    "hybrid_contribution": {
+      "recall@10": 0.0,
+      "ndcg@10": 0.007,
+      "mrr@10": 0.0147
+    },
+    "rerank_contribution": {
+      "recall@10": 0.0,
+      "ndcg@10": -0.0013,
+      "mrr@10": 0.0098
+    },
+    "vector_down_availability": {
+      "single_path_recall": 0.0,
+      "hybrid_recall": 0.9926,
+      "delta": 0.9926
+    }
+  },
+  "observations": {
+    "top1_changed_by_hybrid": {
+      "count": 7,
+      "ids": [
+        "q040",
+        "r054",
+        "r056",
+        "r059",
+        "r061",
+        "r063",
+        "r064"
+      ]
+    },
+    "top1_changed_by_rerank": {
+      "count": 13,
+      "ids": [
+        "q033",
+        "q046",
+        "q047",
+        "q050",
+        "r054",
+        "r055",
+        "r059",
+        "r060",
+        "r061",
+        "r062",
+        "r064",
+        "r065",
+        "r068"
+      ]
+    },
+    "keyword_path_used": {
+      "count": 68
+    },
+    "both_paths_hit": {
+      "count": 68
+    },
+    "degraded_in_main_pipeline": {
+      "count": 0
+    }
+  }
+}

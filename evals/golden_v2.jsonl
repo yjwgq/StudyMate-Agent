@@ -1,0 +1,68 @@
+{"id": "q001", "query": "请解释一下监督学习。", "expected_docs": {"ml_basics.md": 2}, "domain": "机器学习基础", "term": "监督学习"}
+{"id": "q002", "query": "无监督学习是什么意思？", "expected_docs": {"ml_basics.md": 2}, "domain": "机器学习基础", "term": "无监督学习"}
+{"id": "q003", "query": "课程材料里怎么讲过拟合的？", "expected_docs": {"ml_basics.md": 2}, "domain": "机器学习基础", "term": "过拟合"}
+{"id": "q004", "query": "交叉验证具体指什么，举个例子？", "expected_docs": {"ml_basics.md": 2}, "domain": "机器学习基础", "term": "交叉验证"}
+{"id": "q005", "query": "什么是反向传播？它解决了什么问题？", "expected_docs": {"deep_learning.md": 2}, "domain": "深度学习入门", "term": "反向传播"}
+{"id": "q006", "query": "激活函数有什么作用？", "expected_docs": {"deep_learning.md": 2}, "domain": "深度学习入门", "term": "激活函数"}
+{"id": "q007", "query": "请解释一下Transformer。", "expected_docs": {"deep_learning.md": 2}, "domain": "深度学习入门", "term": "Transformer"}
+{"id": "q008", "query": "帮我总结批归一化的要点。", "expected_docs": {"deep_learning.md": 2}, "domain": "深度学习入门", "term": "批归一化"}
+{"id": "q009", "query": "事务 ACID的原理是什么？", "expected_docs": {"db_systems.md": 2}, "domain": "数据库系统", "term": "事务 ACID"}
+{"id": "q010", "query": "请解释一下B+ 树索引。", "expected_docs": {"db_systems.md": 2}, "domain": "数据库系统", "term": "B+ 树索引"}
+{"id": "q011", "query": "两阶段锁和它的应用场景是什么？", "expected_docs": {"db_systems.md": 2}, "domain": "数据库系统", "term": "两阶段锁"}
+{"id": "q012", "query": "MVCC是什么意思？", "expected_docs": {"db_systems.md": 2}, "domain": "数据库系统", "term": "MVCC"}
+{"id": "q013", "query": "进程与线程是什么意思？", "expected_docs": {"operating_systems.md": 2}, "domain": "操作系统", "term": "进程与线程"}
+{"id": "q014", "query": "请解释一下死锁。", "expected_docs": {"operating_systems.md": 2}, "domain": "操作系统", "term": "死锁"}
+{"id": "q015", "query": "什么是页面置换？它解决了什么问题？", "expected_docs": {"operating_systems.md": 2}, "domain": "操作系统", "term": "页面置换"}
+{"id": "q016", "query": "IO 多路复用的原理是什么？", "expected_docs": {"operating_systems.md": 2}, "domain": "操作系统", "term": "IO 多路复用"}
+{"id": "q017", "query": "TCP 三次握手的原理是什么？", "expected_docs": {"computer_networks.md": 2}, "domain": "计算机网络", "term": "TCP 三次握手"}
+{"id": "q018", "query": "TCP 拥塞控制是什么意思？", "expected_docs": {"computer_networks.md": 2}, "domain": "计算机网络", "term": "TCP 拥塞控制"}
+{"id": "q019", "query": "什么是HTTP 状态码？它解决了什么问题？", "expected_docs": {"computer_networks.md": 2}, "domain": "计算机网络", "term": "HTTP 状态码"}
+{"id": "q020", "query": "帮我总结DNS 解析的要点。", "expected_docs": {"computer_networks.md": 2}, "domain": "计算机网络", "term": "DNS 解析"}
+{"id": "q021", "query": "中心极限定理的原理是什么？", "expected_docs": {"statistics.md": 2}, "domain": "统计学基础", "term": "中心极限定理"}
+{"id": "q022", "query": "假设检验和它的应用场景是什么？", "expected_docs": {"statistics.md": 2}, "domain": "统计学基础", "term": "假设检验"}
+{"id": "q023", "query": "什么是置信区间？它解决了什么问题？", "expected_docs": {"statistics.md": 2}, "domain": "统计学基础", "term": "置信区间"}
+{"id": "q024", "query": "为什么需要相关与因果？", "expected_docs": {"statistics.md": 2}, "domain": "统计学基础", "term": "相关与因果"}
+{"id": "q025", "query": "单元测试具体指什么，举个例子？", "expected_docs": {"software_engineering.md": 2}, "domain": "软件工程", "term": "单元测试"}
+{"id": "q026", "query": "课程材料里怎么讲SOLID的？", "expected_docs": {"software_engineering.md": 2}, "domain": "软件工程", "term": "SOLID"}
+{"id": "q027", "query": "技术债是什么意思？", "expected_docs": {"software_engineering.md": 2}, "domain": "软件工程", "term": "技术债"}
+{"id": "q028", "query": "CI/CD和它的应用场景是什么？", "expected_docs": {"software_engineering.md": 2}, "domain": "软件工程", "term": "CI/CD"}
+{"id": "q029", "query": "CAP 定理有什么作用？", "expected_docs": {"distributed_systems.md": 2}, "domain": "分布式系统", "term": "CAP 定理"}
+{"id": "q030", "query": "一致性哈希和它的应用场景是什么？", "expected_docs": {"distributed_systems.md": 2}, "domain": "分布式系统", "term": "一致性哈希"}
+{"id": "q031", "query": "帮我总结Raft的要点。", "expected_docs": {"distributed_systems.md": 2}, "domain": "分布式系统", "term": "Raft"}
+{"id": "q032", "query": "幂等性具体指什么，举个例子？", "expected_docs": {"distributed_systems.md": 2}, "domain": "分布式系统", "term": "幂等性"}
+{"id": "q033", "query": "分词有什么作用？", "expected_docs": {"nlp_basics.md": 2}, "domain": "自然语言处理", "term": "分词"}
+{"id": "q034", "query": "什么是TF-IDF？它解决了什么问题？", "expected_docs": {"nlp_basics.md": 2}, "domain": "自然语言处理", "term": "TF-IDF"}
+{"id": "q035", "query": "帮我总结词向量的要点。", "expected_docs": {"nlp_basics.md": 2}, "domain": "自然语言处理", "term": "词向量"}
+{"id": "q036", "query": "命名实体识别是什么意思？", "expected_docs": {"nlp_basics.md": 2}, "domain": "自然语言处理", "term": "命名实体识别"}
+{"id": "q037", "query": "请解释一下RAG。", "expected_docs": {"rag_notes.md": 2}, "domain": "RAG 笔记", "term": "RAG"}
+{"id": "q038", "query": "混合检索和它的应用场景是什么？", "expected_docs": {"rag_notes.md": 2}, "domain": "RAG 笔记", "term": "混合检索"}
+{"id": "q039", "query": "RRF 融合具体指什么，举个例子？", "expected_docs": {"rag_notes.md": 2}, "domain": "RAG 笔记", "term": "RRF 融合"}
+{"id": "q040", "query": "重排序有什么作用？", "expected_docs": {"rag_notes.md": 2}, "domain": "RAG 笔记", "term": "重排序"}
+{"id": "q041", "query": "课程材料里怎么讲特征工程的？", "expected_docs": {"ml_basics.md": 2}, "domain": "机器学习基础", "term": "特征工程"}
+{"id": "q042", "query": "Dropout和它的应用场景是什么？", "expected_docs": {"deep_learning.md": 2}, "domain": "深度学习入门", "term": "Dropout"}
+{"id": "q043", "query": "慢查询优化的原理是什么？", "expected_docs": {"db_systems.md": 2}, "domain": "数据库系统", "term": "慢查询优化"}
+{"id": "q044", "query": "虚拟内存是什么意思？", "expected_docs": {"operating_systems.md": 2}, "domain": "操作系统", "term": "虚拟内存"}
+{"id": "q045", "query": "HTTPS有什么作用？", "expected_docs": {"computer_networks.md": 2}, "domain": "计算机网络", "term": "HTTPS"}
+{"id": "q046", "query": "监督学习和TCP 三次握手分别是什么，有什么区别？", "expected_docs": {"ml_basics.md": 2, "computer_networks.md": 2}, "domain": "机器学习基础×计算机网络", "term": "监督学习|TCP 三次握手", "grading_note": "跨文档问对称分级（M7 修正：原 2/1 是任意约定，会惩罚语义排序）"}
+{"id": "q047", "query": "对比一下事务 ACID与CAP 定理。", "expected_docs": {"db_systems.md": 2, "distributed_systems.md": 2}, "domain": "数据库系统×分布式系统", "term": "事务 ACID|CAP 定理", "grading_note": "跨文档问对称分级（M7 修正：原 2/1 是任意约定，会惩罚语义排序）"}
+{"id": "q048", "query": "反向传播与分词分别在什么场景下使用？", "expected_docs": {"deep_learning.md": 2, "nlp_basics.md": 2}, "domain": "深度学习入门×自然语言处理", "term": "反向传播|分词", "grading_note": "跨文档问对称分级（M7 修正：原 2/1 是任意约定，会惩罚语义排序）"}
+{"id": "q049", "query": "分别解释进程与线程和中心极限定理，并说明差异。", "expected_docs": {"operating_systems.md": 2, "statistics.md": 2}, "domain": "操作系统×统计学基础", "term": "进程与线程|中心极限定理", "grading_note": "跨文档问对称分级（M7 修正：原 2/1 是任意约定，会惩罚语义排序）"}
+{"id": "q050", "query": "单元测试、RAG的定义和区别是什么？", "expected_docs": {"software_engineering.md": 2, "rag_notes.md": 2}, "domain": "软件工程×RAG 笔记", "term": "单元测试|RAG", "grading_note": "跨文档问对称分级（M7 修正：原 2/1 是任意约定，会惩罚语义排序）"}
+{"id": "r051", "query": "RRF 融合的 k 参数取的是多少？为什么说它免调参？", "expected_docs": {"real_m6_acceptance.md": 2}, "domain": "真实语料", "kind": "exact_term", "anchor": "k=60", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r052", "query": "给检索段设的延迟预算是多少？实测又是多少？", "expected_docs": {"real_design_rag.md": 2, "real_m6_acceptance.md": 1}, "domain": "真实语料", "kind": "exact_term", "anchor": "300ms", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r053", "query": "ts_rank_cd 是不是 BM25？如果不是，差别在哪？", "expected_docs": {"real_design_rag.md": 2}, "domain": "真实语料", "kind": "exact_term", "anchor": "ts_rank_cd", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r054", "query": "多租户过滤下近似最近邻召回会出什么问题，项目怎么缓解？", "expected_docs": {"real_design_rag.md": 2}, "domain": "真实语料", "kind": "exact_term", "anchor": "hnsw.iterative_scan", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r055", "query": "两路检索的结果最后是怎么合并成一份排名的？", "expected_docs": {"real_m6_acceptance.md": 2, "real_design_rag.md": 1}, "domain": "真实语料", "kind": "semantic", "anchor": "RRF 融合", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r056", "query": "精排挂了以后系统会怎么办，用户能察觉吗？", "expected_docs": {"real_m6_acceptance.md": 2}, "domain": "真实语料", "kind": "semantic", "anchor": "未精排", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r057", "query": "知识库文档入库时，为什么要先做去噪再分块？", "expected_docs": {"real_design_rag.md": 2}, "domain": "真实语料", "kind": "semantic", "anchor": "去噪", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r058", "query": "回答里的事实性论断没有出处时，系统会做什么处理？", "expected_docs": {"real_design_rag.md": 2}, "domain": "真实语料", "kind": "semantic", "anchor": "groundedness", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r059", "query": "这个项目的向量检索靠什么数据库能力支撑？", "expected_docs": {"real_design_rag.md": 2, "real_project_readme.md": 1}, "domain": "真实语料", "kind": "semantic", "anchor": "pgvector", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r060", "query": "B+ 树索引和 RRF 融合各自解决什么问题？", "expected_docs": {"db_systems.md": 2, "real_m6_acceptance.md": 2}, "domain": "真实语料", "kind": "cross_doc", "anchor": "B+ 树", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r061", "query": "父子分块和 B+ 树索引这两个设计分别是为哪种检索服务的？", "expected_docs": {"real_design_rag.md": 2, "db_systems.md": 2}, "domain": "真实语料", "kind": "cross_doc", "anchor": "父子分块", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r062", "query": "epoll 和向量召回在这个系统里分别处在什么位置？", "expected_docs": {"operating_systems.md": 2, "real_design_rag.md": 2}, "domain": "真实语料", "kind": "cross_doc", "anchor": "epoll", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r063", "query": "TF-IDF 和 RRF 都是排序相关的概念，它们一样吗？", "expected_docs": {"nlp_basics.md": 2, "real_m6_acceptance.md": 2}, "domain": "真实语料", "kind": "cross_doc", "anchor": "TF-IDF", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r064", "query": "如果既想让语义相近但用词不同的内容被召回，又想精确匹配专名，架构上怎么同时满足？", "expected_docs": {"real_m6_acceptance.md": 2, "real_design_rag.md": 1}, "domain": "真实语料", "kind": "long_tail", "anchor": "关键词路", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r065", "query": "上线一个新检索策略时，怎么保证评测结果可复现、不靠感觉？", "expected_docs": {"real_m6_acceptance.md": 2, "real_design_rag.md": 1}, "domain": "真实语料", "kind": "long_tail", "anchor": "feature flag", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r066", "query": "多租户场景下，为什么每一路召回的候选要放大到 200 条？", "expected_docs": {"real_design_rag.md": 2, "real_m6_acceptance.md": 1}, "domain": "真实语料", "kind": "long_tail", "anchor": "每路 top 200", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r067", "query": "项目从最小闭环到 Agent 运行时一共经历了哪几个里程碑，各自什么时候验收的？", "expected_docs": {"real_project_readme.md": 2}, "domain": "真实语料", "kind": "numeric", "anchor": "M4", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
+{"id": "r068", "query": "混合检索每一路召回多少条、融合后留多少条进精排？", "expected_docs": {"real_m6_acceptance.md": 2, "real_design_rag.md": 1}, "domain": "真实语料", "kind": "numeric", "anchor": "候选 50", "source": "M7 人工出题与标注（语料为仓库内真实技术文档）"}
